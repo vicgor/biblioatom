@@ -71,15 +71,13 @@ def extract_blocks_from_html(pagehtml, fallback_text=""):
     blocks = []
 
     if pagehtml:
-        pattern = re.compile(
-            r"<p(?P<attrs>[^>]*)>(?P<body>.*?)</p>"
-            r"|<div(?P<dattrs>[^>]*)>(?P<dbody>.*?)</div>",
-            re.I | re.S,
-        )
+        # Match only <p> elements. <div class="comp-draft"> is a container that
+        # wraps <p class="text|img|ftn"> — matching the div collapses all inner
+        # paragraphs into one block, losing their individual class attributes.
+        pattern = re.compile(r"<p(?P<attrs>[^>]*)>(?P<body>.*?)</p>", re.I | re.S)
         for m in pattern.finditer(pagehtml):
-            attrs = m.group("attrs") or m.group("dattrs") or ""
-            body = m.group("body") if m.group("body") is not None else m.group("dbody")
-            body = body or ""
+            attrs = m.group("attrs") or ""
+            body = m.group("body") or ""
 
             class_match = re.search(r'class=["\']([^"\']+)["\']', attrs, re.I)
             classes = class_match.group(1).split() if class_match else []

@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from biblioatom.fetch import fetch_page, fetch_book_meta, fetch_toc, download_book, FALLBACK_MAX_PAGE
+from biblioatom.fetch import fetch_page, fetch_book_meta, fetch_toc, fetch_image, download_book, FALLBACK_MAX_PAGE
 
 
 def _mock_response(body: str, status: int = 200):
@@ -145,6 +145,40 @@ class TestFetchToc(unittest.TestCase):
         with patch("urllib.request.urlopen", return_value=_mock_response("<html></html>")):
             toc = fetch_toc("test_book")
         self.assertEqual(toc, [])
+
+
+class TestFetchImage(unittest.TestCase):
+    def test_returns_bytes_on_success(self):
+        fake_jpg = b"\xff\xd8\xff\xe0fake jpeg data"
+        with patch("urllib.request.urlopen", return_value=_mock_response(fake_jpg.decode("latin-1"))):
+            # patch read to return bytes directly
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = fake_jpg
+            mock_resp.__enter__ = lambda s: s
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                result = fetch_image("book", 9)
+        self.assertEqual(result, fake_jpg)
+
+    def test_returns_none_on_error(self):
+        with patch("urllib.request.urlopen", side_effect=OSError("404")):
+            result = fetch_image("book", 9)
+        self.assertIsNone(result)
+
+    def test_url_format(self):
+        captured = []
+        fake_jpg = b"\xff\xd8\xff"
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = fake_jpg
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        def capture_url(req, **kwargs):
+            captured.append(req.full_url)
+            return mock_resp
+        with patch("urllib.request.urlopen", side_effect=capture_url):
+            fetch_image("kapitsa_1994", 9)
+        self.assertIn("0009.jpg", captured[0])
+        self.assertIn("kapitsa_1994", captured[0])
 
 
 class TestDownloadBook(unittest.TestCase):
