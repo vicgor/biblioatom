@@ -139,19 +139,26 @@ def main():
             "items": items,
         }
 
+    images_dir = None
+    if args.images:
+        print()
+        _download_images(src, args.outdir, args.delay)
+        candidate = Path(args.outdir) / "images"
+        if candidate.exists():
+            images_dir = candidate
+
     print(f"\nКонвертирую форматы: {', '.join(formats)}")
+    if images_dir and "epub" in formats:
+        print(f"  Встраиваю иллюстрации из {images_dir}/")
     written = convert.build_book(
         src,
         formats=formats,
         outdir=args.outdir,
         prefix=args.prefix,
         chapter_mode=args.chapter_mode,
+        images_dir=images_dir,
     )
     for path in written:
         print(f"  → {path}")
-
-    if args.images:
-        print()
-        _download_images(src, args.outdir, args.delay)
 
     print("Готово.")

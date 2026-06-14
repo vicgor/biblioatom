@@ -406,7 +406,13 @@ def _make_epub_xhtml(title, body_html):
     )
 
 
-def build_epub(src, chapters, out_path):
+def build_epub(src, chapters, out_path, images_dir=None):
+    """Build an EPUB file.
+
+    images_dir: optional Path to a directory with {page:04d}_*.jpg files.
+    When provided, image-caption blocks get a <figure><img/><figcaption/>
+    element instead of a plain italic paragraph.
+    """
     title = src.get("title", "Untitled")
     book_id = src.get("book_id", "book")
 
@@ -416,7 +422,24 @@ def build_epub(src, chapters, out_path):
         "p{margin:0 0 .8em;white-space:pre-wrap;}"
         ".footnote{font-size:.92em;}.image-caption{font-style:italic;}"
         ".chapter-subtitle{font-style:italic;color:#444;}"
+        "figure{margin:1.2em 0;text-align:center;}"
+        "figure img{max-width:100%;height:auto;}"
+        "figcaption{font-style:italic;font-size:.9em;color:#555;margin-top:.4em;}"
     )
+
+    # page_no → (epub_href, local_path)  — avoids duplicate manifest entries
+    embedded_images: dict[int, tuple[str, Path]] = {}
+
+    def _img_for_page(page_no: int):
+        """Return (epub_href, local_path) for a page, or None if not found."""
+        if images_dir is None:
+            return None
+        matches = sorted(Path(images_dir).glob(f"{page_no:04d}_*.jpg"))
+        if not matches:
+            return None
+        local = matches[0]
+        href = f"images/{local.name}"
+        return href, local
 
     manifest_items = [
         '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
@@ -437,7 +460,23 @@ def build_epub(src, chapters, out_path):
             if block["type"] == "footnote":
                 body.append(f'<p class="footnote">{text}</p>')
             elif block["type"] == "image-caption":
-                body.append(f'<p class="image-caption">{text}</p>')
+                img = _img_for_page(block["page"])
+                if img:
+                    href, local = img
+                    img_id = f"img_{block['page']:04d}"
+                    if block["page"] not in embedded_images:
+                        embedded_images[block["page"]] = (href, local)
+                        manifest_items.append(
+                            f'<item id="{img_id}" href="{href}" media-type="image/jpeg"/>'
+                        )
+                    body.append(
+                        f'<figure>'
+                        f'<img src="../{href}" alt="{html.escape(block["text"][:120])}"/>'
+                        f"<figcaption>{text}</figcaption>"
+                        f"</figure>"
+                    )
+                else:
+                    body.append(f'<p class="image-caption">{text}</p>')
             else:
                 body.append(f"<p>{text}</p>")
         fname = f"text/chapter_{idx}.xhtml"
@@ -507,6 +546,8 @@ def build_epub(src, chapters, out_path):
         zf.writestr("OEBPS/styles/style.css", style_css)
         for fname, content in chapter_files:
             zf.writestr(f"OEBPS/{fname}", content)
+        for _page_no, (href, local) in embedded_images.items():
+            zf.write(local, f"OEBPS/{href}")
 
 
 # ---------------------------------------------------------------------------
@@ -579,7 +620,7 @@ def split_chapters_by_toc(pages, toc):
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def build_book(src, formats, outdir, prefix="", chapter_mode="strict"):
+def build_book(src, formats, outdir, prefix="", chapter_mode="strict", images_dir=None):
     """Convert src dict to requested formats in outdir. Returns list of written paths."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -634,7 +675,7 @@ def build_book(src, formats, outdir, prefix="", chapter_mode="strict"):
         if not chapters:
             chapters = split_into_chapters(pages, mode=chapter_mode)
         out = outdir / f"{stem}.epub"
-        build_epub(src, chapters, out)
+        build_epub(src, chapters, out, images_dir=images_dir)
         written.append(out)
 
     return written
