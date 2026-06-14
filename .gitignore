@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+output_books/
+*.epub
+*.fb2
+*.html
+*.txt
+!README.md

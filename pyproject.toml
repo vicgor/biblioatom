@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biblioatom"
+version = "0.1.0"
+description = "Download and convert books from elib.biblioatom.ru"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Victor Goryachko", email = "victor.goryachko@aventusit.eu" }
+]
+requires-python = ">=3.9"
+dependencies = []  # stdlib only: argparse, json, re, html, zipfile, xml.etree, urllib
+
+[project.scripts]
+biblioatom = "biblioatom.cli:main"
+
+[project.urls]
+Repository = "https://github.com/vicgor/biblioatom"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
