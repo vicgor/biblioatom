@@ -111,8 +111,13 @@ def page_to_model(item):
     pagetext = normalize_text(embedded.get("pagetext", ""))
     pagehtml = clean_pagehtml(embedded.get("pagehtml", ""))
     valid = embedded.get("valid", True)
+    # Print page number shown on the page (<p class="page-no">N</p> after clean_pagehtml).
+    # CDN JPG files are keyed by this number, not by the 0-based RPC page index.
+    pno_m = re.search(r'<p[^>]*class="[^"]*page-no[^"]*"[^>]*>(\d+)</p>', pagehtml)
+    html_page_no = int(pno_m.group(1)) if pno_m else None
     return {
         "page": page_num,
+        "html_page_no": html_page_no,
         "valid": valid,
         "pagetext": pagetext,
         "pagehtml": pagehtml,

@@ -57,7 +57,10 @@ def _download_images(src, outdir, delay_ms):
     for pg in pages:
         captions = [b["text"] for b in pg["blocks"] if b["type"] == "image-caption"]
         if captions:
-            photo_pages.append((pg["page"], captions[0]))
+            # cdn_page: CDN JPGs are keyed by the print page number shown in HTML,
+            # which is always 1 less than the RPC page index.
+            cdn_page = pg["html_page_no"] if pg.get("html_page_no") is not None else pg["page"] - 1
+            photo_pages.append((pg["page"], cdn_page, captions[0]))
 
     if not photo_pages:
         print("Страниц с иллюстрациями не найдено")
@@ -68,13 +71,14 @@ def _download_images(src, outdir, delay_ms):
     print(f"Скачиваю иллюстрации: {len(photo_pages)} стр. → {img_dir}/")
 
     ok = err = 0
-    for i, (page_no, caption) in enumerate(photo_pages):
+    for i, (page_no, cdn_page, caption) in enumerate(photo_pages):
         pct = int((i + 1) / len(photo_pages) * 100)
         print(f"\r  [{pct:3d}%] стр. {page_no} ({i + 1}/{len(photo_pages)})", end="", flush=True)
 
-        data = fetch.fetch_image(book_id, page_no)
+        data = fetch.fetch_image(book_id, cdn_page)
         if data:
             slug = convert.slugify(caption)[:60].rstrip("_")
+            # File named by RPC page so that build_epub's _img_for_page can find it
             fname = img_dir / f"{page_no:04d}_{slug}.jpg"
             fname.write_bytes(data)
             ok += 1
