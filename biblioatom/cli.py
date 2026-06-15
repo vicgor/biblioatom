@@ -35,8 +35,10 @@ def parse_args():
                         help="Режим определения глав (по умолчанию: strict)")
     parser.add_argument("--delay", type=int, default=300, metavar="MS",
                         help="Задержка между запросами в мс (по умолчанию: 300)")
-    parser.add_argument("--images", action="store_true",
-                        help="Скачать JPG для страниц с иллюстрациями в outdir/images/")
+    parser.add_argument("--images", nargs="?", const="images", default=None, metavar="DIR",
+                        help="Папка с иллюстрациями (по умолчанию: images/). "
+                             "При скачивании — JPG сохраняются туда. "
+                             "При --from-json — берутся оттуда без скачивания.")
 
     return parser.parse_args()
 
@@ -46,7 +48,7 @@ def _progress(done, total, page_no):
     print(f"\r  [{pct:3d}%] стр. {page_no} ({done + 1}/{total})", end="", flush=True)
 
 
-def _download_images(src, outdir, delay_ms):
+def _download_images(src, outdir, delay_ms, img_subdir="images"):
     book_id = src.get("book_id", "")
     if not book_id:
         print("Нет book_id в данных — пропускаю изображения")
@@ -66,7 +68,7 @@ def _download_images(src, outdir, delay_ms):
         print("Страниц с иллюстрациями не найдено")
         return
 
-    img_dir = Path(outdir) / "images"
+    img_dir = Path(outdir) / img_subdir
     img_dir.mkdir(parents=True, exist_ok=True)
     print(f"Скачиваю иллюстрации: {len(photo_pages)} стр. → {img_dir}/")
 
@@ -90,6 +92,14 @@ def _download_images(src, outdir, delay_ms):
 
     print()
     print(f"  Сохранено: {ok} файлов, ошибок: {err}")
+
+
+def _resolve_images_dir(images_arg, outdir):
+    """Возвращает абсолютный Path к папке изображений."""
+    p = Path(images_arg)
+    if p.is_absolute():
+        return p
+    return Path(outdir) / p
 
 
 def main():
@@ -145,11 +155,21 @@ def main():
 
     images_dir = None
     if args.images:
-        print()
-        _download_images(src, args.outdir, args.delay)
-        candidate = Path(args.outdir) / "images"
-        if candidate.exists():
-            images_dir = candidate
+        img_path = _resolve_images_dir(args.images, args.outdir)
+
+        if args.from_json:
+            # При --from-json не скачиваем — используем готовую папку
+            if img_path.exists():
+                images_dir = img_path
+                print(f"Использую изображения из {img_path}/")
+            else:
+                print(f"Папка с изображениями не найдена: {img_path} — пропускаю")
+        else:
+            # При скачивании книги — загружаем JPG в указанную папку
+            print()
+            _download_images(src, args.outdir, args.delay, img_subdir=args.images)
+            if img_path.exists():
+                images_dir = img_path
 
     print(f"\nКонвертирую форматы: {', '.join(formats)}")
     if images_dir and "epub" in formats:
