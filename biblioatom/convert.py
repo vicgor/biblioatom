@@ -129,6 +129,22 @@ def build_book_models(src):
     return [page_to_model(item) for item in src.get("items", [])]
 
 
+def find_photo_pages(src: dict) -> list[tuple[int, int, str]]:
+    """Return (rpc_page, cdn_page, caption) for pages with image-caption blocks.
+
+    cdn_page is the print page number shown in HTML (html_page_no), which is
+    the key used by the CDN for JPG files. Falls back to rpc_page - 1 when
+    html_page_no is absent.
+    """
+    result = []
+    for pg in build_book_models(src):
+        captions = [b["text"] for b in pg["blocks"] if b["type"] == "image-caption"]
+        if captions:
+            cdn = pg["html_page_no"] if pg.get("html_page_no") is not None else pg["page"] - 1
+            result.append((pg["page"], cdn, captions[0]))
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Chapter detection
 # ---------------------------------------------------------------------------
@@ -192,8 +208,8 @@ def is_probable_author_line(text):
     words = t.split()
     if len(words) < 2 or len(words) > 6:
         return False
-    initials = sum(1 for w in words if re.match(r"^[А-ЯA-Z]\.?[А-ЯA-Z]?\.$", w))
-    surname_like = any(re.match(r"^[А-ЯA-ZЁ][а-яa-zё-]+$", w) for w in words)
+    initials = sum(1 for w in words if re.match(r"^[А-ЯA-Z]\.?[А-ЯA-Z]?\.$ ", w))
+    surname_like = any(re.match(r"^[А-ЯЁA-Z][а-яёa-z-]+$", w) for w in words)
     return initials >= 1 and surname_like
 
 
@@ -411,6 +427,14 @@ def _make_epub_xhtml(title, body_html):
     )
 
 
+def _img_for_page(page_no: int, images_dir: Path | None) -> tuple[str, Path] | None:
+    """Return (epub_href, local_path) for page_no, or None if no match found."""
+    if images_dir is None:
+        return None
+    matches = sorted(Path(images_dir).glob(f"{page_no:04d}_*.jpg"))
+    return (f"images/{matches[0].name}", matches[0]) if matches else None
+
+
 def build_epub(src, chapters, out_path, images_dir=None):
     """Build an EPUB file.
 
@@ -435,17 +459,6 @@ def build_epub(src, chapters, out_path, images_dir=None):
     # page_no → (epub_href, local_path)  — avoids duplicate manifest entries
     embedded_images: dict[int, tuple[str, Path]] = {}
 
-    def _img_for_page(page_no: int):
-        """Return (epub_href, local_path) for a page, or None if not found."""
-        if images_dir is None:
-            return None
-        matches = sorted(Path(images_dir).glob(f"{page_no:04d}_*.jpg"))
-        if not matches:
-            return None
-        local = matches[0]
-        href = f"images/{local.name}"
-        return href, local
-
     manifest_items = [
         '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
         '<item id="nav" href="text/nav.xhtml" media-type="application/xhtml+xml"/>',
@@ -465,7 +478,7 @@ def build_epub(src, chapters, out_path, images_dir=None):
             if block["type"] == "footnote":
                 body.append(f'<p class="footnote">{text}</p>')
             elif block["type"] == "image-caption":
-                img = _img_for_page(block["page"])
+                img = _img_for_page(block["page"], images_dir)
                 if img:
                     href, local = img
                     img_id = f"img_{block['page']:04d}"

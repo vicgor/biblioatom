@@ -150,14 +150,12 @@ class TestFetchToc(unittest.TestCase):
 class TestFetchImage(unittest.TestCase):
     def test_returns_bytes_on_success(self):
         fake_jpg = b"\xff\xd8\xff\xe0fake jpeg data"
-        with patch("urllib.request.urlopen", return_value=_mock_response(fake_jpg.decode("latin-1"))):
-            # patch read to return bytes directly
-            mock_resp = MagicMock()
-            mock_resp.read.return_value = fake_jpg
-            mock_resp.__enter__ = lambda s: s
-            mock_resp.__exit__ = MagicMock(return_value=False)
-            with patch("urllib.request.urlopen", return_value=mock_resp):
-                result = fetch_image("book", 9)
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = fake_jpg
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = fetch_image("book", 9)
         self.assertEqual(result, fake_jpg)
 
     def test_returns_none_on_error(self):

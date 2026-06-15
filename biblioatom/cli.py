@@ -48,19 +48,7 @@ def _progress(done, total, page_no):
 
 def _download_images(src, outdir, delay_ms):
     book_id = src.get("book_id", "")
-    if not book_id:
-        print("Нет book_id в данных — пропускаю изображения")
-        return
-
-    pages = convert.build_book_models(src)
-    photo_pages = []
-    for pg in pages:
-        captions = [b["text"] for b in pg["blocks"] if b["type"] == "image-caption"]
-        if captions:
-            # cdn_page: CDN JPGs are keyed by the print page number shown in HTML,
-            # which is always 1 less than the RPC page index.
-            cdn_page = pg["html_page_no"] if pg.get("html_page_no") is not None else pg["page"] - 1
-            photo_pages.append((pg["page"], cdn_page, captions[0]))
+    photo_pages = convert.find_photo_pages(src)
 
     if not photo_pages:
         print("Страниц с иллюстрациями не найдено")
@@ -78,9 +66,8 @@ def _download_images(src, outdir, delay_ms):
         data = fetch.fetch_image(book_id, cdn_page)
         if data:
             slug = convert.slugify(caption)[:60].rstrip("_")
-            # File named by RPC page so that build_epub's _img_for_page can find it
-            fname = img_dir / f"{page_no:04d}_{slug}.jpg"
-            fname.write_bytes(data)
+            # File named by RPC page so that _img_for_page can find it
+            (img_dir / f"{page_no:04d}_{slug}.jpg").write_bytes(data)
             ok += 1
         else:
             err += 1
@@ -145,6 +132,8 @@ def main():
 
     images_dir = None
     if args.images:
+        if not src.get("book_id"):
+            sys.exit('Ошибка: --images требует book_id в данных (поле "book_id")')
         print()
         _download_images(src, args.outdir, args.delay)
         candidate = Path(args.outdir) / "images"

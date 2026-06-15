@@ -178,12 +178,12 @@ def fetch_toc(book_id, timeout=DEFAULT_TIMEOUT):
     return _parse_toc_html(page_html[start:end])
 
 
-IMAGE_CDN = f"{BASE_URL}/data/{{book_id}}/jpg/{{page:04d}}.jpg"
-
-
 def fetch_image(book_id, page_no, timeout=DEFAULT_TIMEOUT):
     """Fetch a page scan as JPEG bytes. Returns bytes or None on error."""
-    url = f"{BASE_URL}/data/{urllib.parse.quote(book_id, safe='')}/jpg/{page_no:04d}.jpg"
+    url = (
+        f"{BASE_URL}/data/{urllib.parse.quote(book_id, safe='')}"
+        f"/jpg/{page_no:04d}.jpg"
+    )
     try:
         req = urllib.request.Request(url, headers=_HEADERS)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
