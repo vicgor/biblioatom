@@ -23,6 +23,8 @@ class ElementKind(StrEnum):
     QUOTE = "quote"
     SIDEBAR = "sidebar"
     HEADING = "heading"
+    # Trailing underscore в имени — из-за конфликта с builtin 'list'; член имеет
+    # неочевидное сериализованное значение "list_" (не "list").
     LIST = "list_"
     TABLE = "table"
 
