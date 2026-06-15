@@ -71,15 +71,13 @@ def extract_blocks_from_html(pagehtml, fallback_text=""):
     blocks = []
 
     if pagehtml:
-        pattern = re.compile(
-            r"<p(?P<attrs>[^>]*)>(?P<body>.*?)</p>"
-            r"|<div(?P<dattrs>[^>]*)>(?P<dbody>.*?)</div>",
-            re.I | re.S,
-        )
+        # Match only <p> elements. <div class="comp-draft"> is a container that
+        # wraps <p class="text|img|ftn"> — matching the div collapses all inner
+        # paragraphs into one block, losing their individual class attributes.
+        pattern = re.compile(r"<p(?P<attrs>[^>]*)>(?P<body>.*?)</p>", re.I | re.S)
         for m in pattern.finditer(pagehtml):
-            attrs = m.group("attrs") or m.group("dattrs") or ""
-            body = m.group("body") if m.group("body") is not None else m.group("dbody")
-            body = body or ""
+            attrs = m.group("attrs") or ""
+            body = m.group("body") or ""
 
             class_match = re.search(r'class=["\']([^"\']+)["\']', attrs, re.I)
             classes = class_match.group(1).split() if class_match else []
@@ -113,8 +111,13 @@ def page_to_model(item):
     pagetext = normalize_text(embedded.get("pagetext", ""))
     pagehtml = clean_pagehtml(embedded.get("pagehtml", ""))
     valid = embedded.get("valid", True)
+    # Print page number shown on the page (<p class="page-no">N</p> after clean_pagehtml).
+    # CDN JPG files are keyed by this number, not by the 0-based RPC page index.
+    pno_m = re.search(r'<p[^>]*class="[^"]*page-no[^"]*"[^>]*>(\d+)</p>', pagehtml)
+    html_page_no = int(pno_m.group(1)) if pno_m else None
     return {
         "page": page_num,
+        "html_page_no": html_page_no,
         "valid": valid,
         "pagetext": pagetext,
         "pagehtml": pagehtml,
@@ -408,7 +411,13 @@ def _make_epub_xhtml(title, body_html):
     )
 
 
-def build_epub(src, chapters, out_path):
+def build_epub(src, chapters, out_path, images_dir=None):
+    """Build an EPUB file.
+
+    images_dir: optional Path to a directory with {page:04d}_*.jpg files.
+    When provided, image-caption blocks get a <figure><img/><figcaption/>
+    element instead of a plain italic paragraph.
+    """
     title = src.get("title", "Untitled")
     book_id = src.get("book_id", "book")
 
@@ -418,7 +427,24 @@ def build_epub(src, chapters, out_path):
         "p{margin:0 0 .8em;white-space:pre-wrap;}"
         ".footnote{font-size:.92em;}.image-caption{font-style:italic;}"
         ".chapter-subtitle{font-style:italic;color:#444;}"
+        "figure{margin:1.2em 0;text-align:center;}"
+        "figure img{max-width:100%;height:auto;}"
+        "figcaption{font-style:italic;font-size:.9em;color:#555;margin-top:.4em;}"
     )
+
+    # page_no → (epub_href, local_path)  — avoids duplicate manifest entries
+    embedded_images: dict[int, tuple[str, Path]] = {}
+
+    def _img_for_page(page_no: int):
+        """Return (epub_href, local_path) for a page, or None if not found."""
+        if images_dir is None:
+            return None
+        matches = sorted(Path(images_dir).glob(f"{page_no:04d}_*.jpg"))
+        if not matches:
+            return None
+        local = matches[0]
+        href = f"images/{local.name}"
+        return href, local
 
     manifest_items = [
         '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
@@ -439,7 +465,23 @@ def build_epub(src, chapters, out_path):
             if block["type"] == "footnote":
                 body.append(f'<p class="footnote">{text}</p>')
             elif block["type"] == "image-caption":
-                body.append(f'<p class="image-caption">{text}</p>')
+                img = _img_for_page(block["page"])
+                if img:
+                    href, local = img
+                    img_id = f"img_{block['page']:04d}"
+                    if block["page"] not in embedded_images:
+                        embedded_images[block["page"]] = (href, local)
+                        manifest_items.append(
+                            f'<item id="{img_id}" href="{href}" media-type="image/jpeg"/>'
+                        )
+                    body.append(
+                        f'<figure>'
+                        f'<img src="../{href}" alt="{html.escape(block["text"][:120])}"/>'
+                        f"<figcaption>{text}</figcaption>"
+                        f"</figure>"
+                    )
+                else:
+                    body.append(f'<p class="image-caption">{text}</p>')
             else:
                 body.append(f"<p>{text}</p>")
         fname = f"text/chapter_{idx}.xhtml"
@@ -509,6 +551,8 @@ def build_epub(src, chapters, out_path):
         zf.writestr("OEBPS/styles/style.css", style_css)
         for fname, content in chapter_files:
             zf.writestr(f"OEBPS/{fname}", content)
+        for _page_no, (href, local) in embedded_images.items():
+            zf.write(local, f"OEBPS/{href}")
 
 
 # ---------------------------------------------------------------------------
@@ -581,7 +625,7 @@ def split_chapters_by_toc(pages, toc):
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def build_book(src, formats, outdir, prefix="", chapter_mode="strict"):
+def build_book(src, formats, outdir, prefix="", chapter_mode="strict", images_dir=None):
     """Convert src dict to requested formats in outdir. Returns list of written paths."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -636,7 +680,7 @@ def build_book(src, formats, outdir, prefix="", chapter_mode="strict"):
         if not chapters:
             chapters = split_into_chapters(pages, mode=chapter_mode)
         out = outdir / f"{stem}.epub"
-        build_epub(src, chapters, out)
+        build_epub(src, chapters, out, images_dir=images_dir)
         written.append(out)
 
     return written
