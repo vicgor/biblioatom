@@ -1,9 +1,8 @@
 """Protocol-интерфейсы сервисного слоя (Dependency Inversion).
 
 Здесь объявлены только контракты (``typing.Protocol``) — без реализаций.
-Конкретные реализации (httpx-fetcher, selectolax-parser, OpenCV-extractor и
-т.д.) появятся в следующих этапах миграции и будут проверяться на соответствие
-этим протоколам структурно.
+Конкретные реализации появятся в следующих этапах миграции и будут проверяться
+на соответствие этим протоколам структурно.
 """
 
 from __future__ import annotations
@@ -47,7 +46,11 @@ class ParserProtocol(Protocol):
     """Разбор сырого HTML/JSON в доменные модели."""
 
     def parse_embedded_content(self, raw: str | dict[str, object]) -> EmbeddedContent:
-        """Разобрать поле ``content`` страницы."""
+        """Разобрать поле ``content`` страницы.
+
+        ``raw`` — либо JSON-строка, либо уже распарсенный словарь
+        (совместимость с legacy-форматом).
+        """
         ...
 
     def page_to_model(self, page: int, content: EmbeddedContent) -> PageModel:

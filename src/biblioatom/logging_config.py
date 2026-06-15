@@ -1,8 +1,9 @@
 """Настройка структурированного логирования на structlog поверх stdlib logging.
 
 Для интерактивного терминала (tty/dev) используется цветной ``ConsoleRenderer``,
-для CI/pipe — ``JSONRenderer``. Поддерживается correlation_id через
-``contextvars``, временные метки и редакция секретов.
+иначе — ``JSONRenderer``. Выбор рендерера основан на ``sys.stderr.isatty()``.
+Поддерживается correlation_id через ``contextvars``, временные метки и редакция
+секретов.
 """
 
 from __future__ import annotations
@@ -41,30 +42,44 @@ def add_correlation_id(
     return event_dict
 
 
+def _redact_value(value: Any) -> Any:
+    """Рекурсивно замаскировать секреты во вложенных dict и списках dict."""
+
+    if isinstance(value, dict):
+        return {
+            k: (_REDACTED if k.lower() in _SECRET_KEYS else _redact_value(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    return value
+
+
 def redact_secrets(_logger: logging.Logger, _method_name: str, event_dict: EventDict) -> EventDict:
-    """Процессор: заменить значения секретных ключей на маску."""
+    """Процессор: заменить значения секретных ключей на маску на любой глубине."""
 
     for key in list(event_dict.keys()):
         if key.lower() in _SECRET_KEYS:
             event_dict[key] = _REDACTED
+        else:
+            event_dict[key] = _redact_value(event_dict[key])
     return event_dict
 
 
 def setup_logging(level: str = "INFO", *, json_logs: bool | None = None) -> None:
     """Сконфигурировать structlog и stdlib logging.
 
-    :param level: минимальный уровень (``DEBUG``..``CRITICAL``).
+    :param level: минимальный уровень (``DEBUG``..``CRITICAL``); валидируется в
+        :class:`~biblioatom.config.LoggingSettings`.
     :param json_logs: принудительно включить/выключить JSON-рендеринг. Если
-        ``None`` — выбирается автоматически: JSON для не-tty (CI/pipe),
-        цветной вывод для интерактивного терминала.
+        ``None`` — выбирается автоматически по ``sys.stderr.isatty()``: JSON для
+        не-tty, цветной вывод для интерактивного терминала.
     """
 
     if json_logs is None:
         json_logs = not sys.stderr.isatty()
 
-    numeric_level = logging.getLevelName(level.upper())
-    if not isinstance(numeric_level, int):
-        numeric_level = logging.INFO
+    numeric_level: int = logging.getLevelName(level.upper())
 
     shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,

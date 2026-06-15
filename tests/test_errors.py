@@ -10,6 +10,7 @@ from biblioatom.errors import (
     ConversionError,
     EpubBuildError,
     ExitCode,
+    ExternalToolExecutionError,
     ExternalToolNotFoundError,
     FetchError,
     HttpTimeoutError,
@@ -38,6 +39,7 @@ from biblioatom.errors import (
         (EpubBuildError("x"), ExitCode.EPUB_BUILD),
         (ConversionError("x"), ExitCode.EXTERNAL_TOOL),
         (ExternalToolNotFoundError("x"), ExitCode.EXTERNAL_TOOL),
+        (ExternalToolExecutionError("x"), ExitCode.EXTERNAL_TOOL),
     ],
 )
 def test_exit_code_for_domain_errors(exc: BookgrabError, expected: ExitCode) -> None:
@@ -64,6 +66,10 @@ def test_context_and_chaining() -> None:
     assert err.context == {"book_id": "kapitsa_1994"}
     assert err.__cause__ is cause
     assert "kapitsa_1994" in str(err)
+
+
+def test_str_without_context() -> None:
+    assert str(ConfigurationError("msg")) == "msg"
 
 
 def test_exit_codes_are_stable() -> None:

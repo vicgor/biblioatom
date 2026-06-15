@@ -12,8 +12,10 @@ Image/Epub/Conversion/Logging). Значения читаются из пере�
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from biblioatom.errors import ConfigurationError
 
 
 class AppSettings(BaseModel):
@@ -97,6 +99,20 @@ class LoggingSettings(BaseModel):
     level: str = "INFO"
     json_logs: bool = False
 
+    @field_validator("level")
+    @classmethod
+    def _validate_level(cls, v: str) -> str:
+        """Проверить, что уровень — один из допустимых имён logging."""
+
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        normalized = v.upper()
+        if normalized not in allowed:
+            raise ValueError(
+                f"Недопустимый уровень логирования {v!r}. "
+                f"Допустимые значения: {', '.join(sorted(allowed))}."
+            )
+        return normalized
+
 
 class Settings(BaseSettings):
     """Корневые настройки приложения с вложенными группами."""
@@ -123,7 +139,13 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Собрать настройки из окружения/``.env`` со значениями по умолчанию."""
 
-    return Settings()
+    try:
+        return Settings()
+    except ValidationError as exc:
+        raise ConfigurationError(
+            "Invalid configuration. Check environment variables or .env file.",
+            context={"details": exc.errors(include_url=False)},
+        ) from exc
 
 
 __all__ = [
