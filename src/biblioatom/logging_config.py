@@ -1,0 +1,110 @@
+"""Настройка структурированного логирования на structlog поверх stdlib logging.
+
+Для интерактивного терминала (tty/dev) используется цветной ``ConsoleRenderer``,
+для CI/pipe — ``JSONRenderer``. Поддерживается correlation_id через
+``contextvars``, временные метки и редакция секретов.
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+from contextvars import ContextVar
+from typing import Any
+
+import structlog
+from structlog.types import EventDict, Processor
+
+#: Идентификатор корреляции для связывания записей в рамках одной операции.
+_correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
+
+#: Ключи, значения которых должны быть скрыты в логах.
+_SECRET_KEYS = frozenset({"password", "token", "secret", "authorization", "api_key", "cookie"})
+
+_REDACTED = "***REDACTED***"
+
+
+def set_correlation_id(value: str | None) -> None:
+    """Установить correlation_id для текущего контекста выполнения."""
+
+    _correlation_id.set(value)
+
+
+def add_correlation_id(
+    _logger: logging.Logger, _method_name: str, event_dict: EventDict
+) -> EventDict:
+    """Процессор: добавить correlation_id в запись, если он задан."""
+
+    cid = _correlation_id.get()
+    if cid is not None:
+        event_dict["correlation_id"] = cid
+    return event_dict
+
+
+def redact_secrets(_logger: logging.Logger, _method_name: str, event_dict: EventDict) -> EventDict:
+    """Процессор: заменить значения секретных ключей на маску."""
+
+    for key in list(event_dict.keys()):
+        if key.lower() in _SECRET_KEYS:
+            event_dict[key] = _REDACTED
+    return event_dict
+
+
+def setup_logging(level: str = "INFO", *, json_logs: bool | None = None) -> None:
+    """Сконфигурировать structlog и stdlib logging.
+
+    :param level: минимальный уровень (``DEBUG``..``CRITICAL``).
+    :param json_logs: принудительно включить/выключить JSON-рендеринг. Если
+        ``None`` — выбирается автоматически: JSON для не-tty (CI/pipe),
+        цветной вывод для интерактивного терминала.
+    """
+
+    if json_logs is None:
+        json_logs = not sys.stderr.isatty()
+
+    numeric_level = logging.getLevelName(level.upper())
+    if not isinstance(numeric_level, int):
+        numeric_level = logging.INFO
+
+    shared_processors: list[Processor] = [
+        structlog.contextvars.merge_contextvars,
+        add_correlation_id,
+        redact_secrets,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.StackInfoRenderer(),
+    ]
+
+    renderer: Processor = (
+        structlog.processors.JSONRenderer()
+        if json_logs
+        else structlog.dev.ConsoleRenderer(colors=True)
+    )
+
+    structlog.configure(
+        processors=[*shared_processors, structlog.processors.format_exc_info, renderer],
+        wrapper_class=structlog.make_filtering_bound_logger(numeric_level),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        cache_logger_on_first_use=True,
+    )
+
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stderr,
+        level=numeric_level,
+    )
+
+
+def get_logger(name: str | None = None) -> Any:
+    """Вернуть structlog-логгер (опционально именованный)."""
+
+    return structlog.get_logger(name)
+
+
+__all__ = [
+    "add_correlation_id",
+    "get_logger",
+    "redact_secrets",
+    "set_correlation_id",
+    "setup_logging",
+]
