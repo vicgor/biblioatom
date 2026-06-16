@@ -14,6 +14,7 @@ from biblioatom.models import (
     BookMeta,
     BuildResult,
     EmbeddedContent,
+    ExtractedImage,
     ImageAsset,
     PageModel,
     StructuredDocument,
@@ -91,10 +92,34 @@ class ConverterProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class ScanExtractorProtocol(Protocol):
+    """Извлечение фото/иллюстраций со скана страницы (OpenCV, без OCR)."""
+
+    def extract(self, image: bytes, page: int) -> list[ExtractedImage]:
+        """Найти прямоугольные иллюстрации на скане и вернуть кропы.
+
+        :param image: закодированные байты исходного скана (PNG/JPEG).
+        :param page: номер страницы (проставляется в результат).
+        """
+        ...
+
+
+@runtime_checkable
+class ImageProcessorProtocol(Protocol):
+    """Постобработка извлечённого кропа (Pillow): нормализация/ресайз/сохранение."""
+
+    def process(self, image: ExtractedImage, out_path: Path) -> ImageAsset:
+        """Постобработать кроп и сохранить его в ``out_path``, вернуть ассет."""
+        ...
+
+
 __all__ = [
     "ConverterProtocol",
     "EpubBuilderProtocol",
     "FetcherProtocol",
+    "ImageProcessorProtocol",
     "ParserProtocol",
+    "ScanExtractorProtocol",
     "StructureAnalyzerProtocol",
 ]

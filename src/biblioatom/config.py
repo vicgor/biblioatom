@@ -58,7 +58,17 @@ class StructureSettings(BaseModel):
 
 
 class ScanExtractionSettings(BaseModel):
-    """Настройки извлечения иллюстраций со сканов (OpenCV)."""
+    """Настройки извлечения иллюстраций со сканов (OpenCV).
+
+    Фильтры контуров отбрасывают текстовый шум и оставляют прямоугольные
+    фото/иллюстрации:
+
+    * площадь — доля от площади страницы (``min_area_ratio``/``max_area_ratio``);
+    * соотношение сторон ``aspect = w / h`` (``min_aspect``/``max_aspect``);
+    * заполнение (``extent = area / (w*h)``) — ``min_fill_ratio``;
+    * прямоугольность (``area / area(minAreaRect)``) — ``min_rectangularity``;
+    * паддинг кропа в пикселях — ``crop_padding``.
+    """
 
     blur_kernel: int = Field(default=5, ge=1)
     min_area_ratio: float = Field(default=0.02, ge=0, le=1)
@@ -66,6 +76,22 @@ class ScanExtractionSettings(BaseModel):
     min_aspect: float = Field(default=0.2, gt=0)
     max_aspect: float = Field(default=5.0, gt=0)
     min_fill_ratio: float = Field(default=0.5, ge=0, le=1)
+    min_rectangularity: float = Field(default=0.7, ge=0, le=1)
+    use_canny: bool = True
+    canny_threshold1: float = Field(default=50.0, ge=0)
+    canny_threshold2: float = Field(default=150.0, ge=0)
+    morph_kernel: int = Field(default=9, ge=1)
+    morph_iterations: int = Field(default=1, ge=0)
+    crop_padding: int = Field(default=4, ge=0)
+
+    @field_validator("blur_kernel", "morph_kernel")
+    @classmethod
+    def _validate_odd_kernel(cls, v: int) -> int:
+        """Размер ядра OpenCV должен быть нечётным (требование GaussianBlur)."""
+
+        if v % 2 == 0:
+            raise ValueError("Размер ядра должен быть нечётным.")
+        return v
 
 
 class ImageSettings(BaseModel):
@@ -75,6 +101,7 @@ class ImageSettings(BaseModel):
     quality: int = Field(default=85, ge=1, le=100)
     max_width: int | None = Field(default=1600, ge=1)
     max_height: int | None = Field(default=2400, ge=1)
+    target_mode: str = "RGB"
 
 
 class EpubSettings(BaseModel):
