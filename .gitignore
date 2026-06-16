@@ -12,6 +12,13 @@ build/
 htmlcov/
 output/
 output_books/
+
+# Одноразовые скрипты-черновики (не часть проекта)
+crop_photos.py
+crop_photos_cv.py
+crop_photos_cv_fixed.py
+extract_photos.py
+docs/
 *.azw3
 output/*.epub
 output/*.fb2
