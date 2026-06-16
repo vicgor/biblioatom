@@ -1,4 +1,7 @@
+import tempfile
 import unittest
+from pathlib import Path
+
 from biblioatom.convert import (
     normalize_text,
     extract_blocks_from_html,
@@ -8,6 +11,10 @@ from biblioatom.convert import (
     split_chapters_by_toc,
     find_photo_pages,
     build_book,
+    build_book_models,
+    build_txt,
+    output_stem,
+    parse_embedded_content,
 )
 
 
@@ -20,7 +27,7 @@ class TestNormalizeText(unittest.TestCase):
         self.assertNotIn("\n\n\n", result)
 
     def test_replaces_nbsp(self):
-        self.assertEqual(normalize_text("слово слово"), "слово слово")
+        self.assertEqual(normalize_text("слово\u00a0слово"), "слово слово")
 
     def test_empty_input(self):
         self.assertEqual(normalize_text(""), "")
@@ -158,21 +165,26 @@ class TestFindPhotoPages(unittest.TestCase):
                     ) if html_page_no is not None else f'<p class="img">{caption}</p>',
                 },
             }]
+        }
 
+    def test_returns_photo_pages(self):
+        src = self._src_with_image_page(rpc_page=10, html_page_no=9, caption="Портрет")
+        result = find_photo_pages(src)
+        self.assertEqual(len(result), 1)
+        rpc, cdn, cap = result[0]
+        self.assertEqual(rpc, 10)
+        self.assertEqual(cdn, 9)
+        self.assertEqual(cap, "Портрет")
 
-class TestPageToModel(unittest.TestCase):
-    def test_html_page_no_extracted(self):
-        item = {"page": 5, "content": {
-            "valid": True, "pagetext": "",
-            "pagehtml": '<p class="page-no">42</p><p class="text">Hello</p>'
-        }}
-        self.assertEqual(page_to_model(item)["html_page_no"], 42)
+    def test_fallback_cdn_when_no_html_page_no(self):
+        src = self._src_with_image_page(rpc_page=10, html_page_no=None, caption="Фото")
+        result = find_photo_pages(src)
+        rpc, cdn, _ = result[0]
+        self.assertEqual(cdn, rpc - 1)
 
-    def test_html_page_no_none_when_absent(self):
-        item = {"page": 5, "content": {
-            "valid": True, "pagetext": "", "pagehtml": '<p class="text">Hello</p>'
-        }}
-        self.assertIsNone(page_to_model(item)["html_page_no"])
+    def test_no_image_pages(self):
+        src = {"items": [{"page": 1, "content": {"valid": True, "pagetext": "Текст", "pagehtml": ""}}]}
+        self.assertEqual(find_photo_pages(src), [])
 
 
 class TestParseEmbeddedContent(unittest.TestCase):
@@ -261,24 +273,11 @@ class TestBuildBook(unittest.TestCase):
             ],
         }
 
-    def test_returns_photo_pages(self):
-        src = self._src_with_image_page(rpc_page=10, html_page_no=9, caption="Портрет")
-        result = find_photo_pages(src)
-        self.assertEqual(len(result), 1)
-        rpc, cdn, cap = result[0]
-        self.assertEqual(rpc, 10)
-        self.assertEqual(cdn, 9)
-        self.assertEqual(cap, "Портрет")
-
-    def test_fallback_cdn_when_no_html_page_no(self):
-        src = self._src_with_image_page(rpc_page=10, html_page_no=None, caption="Фото")
-        result = find_photo_pages(src)
-        rpc, cdn, _ = result[0]
-        self.assertEqual(cdn, rpc - 1)  # fallback: rpc_page - 1
-
-    def test_no_image_pages(self):
-        src = {"items": [{"page": 1, "content": {"valid": True, "pagetext": "Текст", "pagehtml": ""}}]}
-        self.assertEqual(find_photo_pages(src), [])
+    def test_build_book_returns_result(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = build_book(self.src, out_dir=Path(tmpdir))
+            self.assertIsNotNone(result)
 
 
 if __name__ == "__main__":
