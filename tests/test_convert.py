@@ -273,11 +273,11 @@ class TestBuildBook(unittest.TestCase):
             ],
         }
 
-    def test_build_book_returns_result(self):
-        import tempfile
+    def test_build_book_txt(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = build_book(self.src, out_dir=Path(tmpdir))
-            self.assertIsNotNone(result)
+            written = build_book(self.src, formats=["txt"], outdir=Path(tmpdir))
+            self.assertEqual(len(written), 1)
+            self.assertTrue(written[0].exists())
 
 
 if __name__ == "__main__":
