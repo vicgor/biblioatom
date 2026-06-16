@@ -233,12 +233,14 @@ def should_start_chapter(text: str, page_no: int, mode: str) -> bool:
         return False
     if mode == "normal":
         return True
+    # Дешёвая числовая проверка идёт первой (ранний выход), чтобы не выполнять
+    # дорогую нормализацию ключа для заведомо ранних страниц.
+    if page_no < STRICT_MIN_PAGE_FOR_CHAPTER:
+        return False
     # Ключ нормализуется один раз и переиспользуется: сравниваем его с
     # FRONT_MATTER_TITLES напрямую вместо повторной нормализации в
     # is_front_matter_heading.
     key = normalized_heading_key(text)
-    if page_no < STRICT_MIN_PAGE_FOR_CHAPTER:
-        return False
     if key in FRONT_MATTER_TITLES:
         return False
     return not (len(key.split()) <= 2 and not key.endswith(":"))
@@ -261,8 +263,11 @@ def split_into_chapters(pages: list[PageModel], mode: str = "strict") -> list[St
     pending_author = ""
 
     def _attach_page(pg: PageModel) -> None:
-        # Каждая страница принадлежит ровно одной главе; одну и ту же страницу
-        # не добавляем дважды (страница может содержать несколько блоков).
+        # Внутри текущей главы одну и ту же страницу не добавляем дважды
+        # (страница может содержать несколько блоков). Это не запрещает
+        # пограничной странице попасть и в соседнюю главу: при заголовке в
+        # середине страницы её хвост остаётся здесь, а новая глава ниже стартует
+        # с того же pg — страница окажется в pages обеих глав (ожидаемо).
         if not current_pages or current_pages[-1].page != pg.page:
             current_pages.append(pg)
 

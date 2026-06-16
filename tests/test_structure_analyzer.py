@@ -20,6 +20,7 @@ from biblioatom.models import (
 from biblioatom.services.structure_analyzer import (
     StructureAnalyzer,
     extract_blocks,
+    is_front_matter_heading,
     is_probable_author_line,
     is_probable_heading,
     page_to_model,
@@ -75,6 +76,22 @@ class TestIsProbableAuthorLine:
 
     def test_hyphenated_surname_initials_first(self) -> None:
         assert is_probable_author_line("А. С. Боровик-Романов")
+
+
+class TestIsFrontMatterHeading:
+    def test_known_front_matter_title(self) -> None:
+        assert is_front_matter_heading("ОБЛОЖКА")
+
+    def test_known_front_matter_with_marks_and_case(self) -> None:
+        # Нормализация ключа: хвостовые звёздочки, регистр и Ё→Е.
+        assert is_front_matter_heading("российская академия наук")
+        assert is_front_matter_heading("ФРОНТИСПИС**")
+
+    def test_ordinary_heading_is_not_front_matter(self) -> None:
+        assert not is_front_matter_heading("ГЛАВА ПЕРВАЯ")
+
+    def test_empty_is_not_front_matter(self) -> None:
+        assert not is_front_matter_heading("")
 
 
 class TestShouldStartChapter:
@@ -178,8 +195,12 @@ class TestSplitIntoChapters:
 
     def test_pages_populated_no_page_lost(self) -> None:
         # Регресс (blocking #3): split_into_chapters обязан заполнять
-        # chapter.pages. Сумма страниц по всем главам = числу входных страниц,
-        # ни одна не теряется и не дублируется.
+        # chapter.pages. Инвариант: номера страниц не теряются и не дублируются
+        # ВНУТРИ одной главы. Здесь каждый заголовок стоит на отдельной странице,
+        # поэтому пограничных случаев нет и суммарный набор совпадает со входом.
+        # (Пограничное поведение — заголовок в середине страницы → страница в
+        # двух соседних главах — задокументировано отдельно в
+        # test_heading_mid_page_shared_between_adjacent_chapters.)
         pages = [
             _page(1, "Предисловие к изданию"),
             _page(10, "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
@@ -191,7 +212,40 @@ class TestSplitIntoChapters:
 
         collected = [p.page for ch in chapters for p in ch.pages]
         assert sorted(collected) == [1, 10, 11, 20, 21]
-        assert len(collected) == len(pages)  # без дублей и пропусков
+        assert len(collected) == len(pages)  # без пропусков
+        # Внутри каждой главы номера страниц уникальны.
+        for ch in chapters:
+            ch_pages = [p.page for p in ch.pages]
+            assert len(ch_pages) == len(set(ch_pages)), (
+                f"глава {ch.title!r} содержит дубли страниц: {ch_pages}"
+            )
+
+    def test_heading_mid_page_shared_between_adjacent_chapters(self) -> None:
+        # Пограничное поведение (ожидаемое, не баг): когда заголовок новой главы
+        # стоит В СЕРЕДИНЕ страницы, эта страница корректно попадает в pages ДВУХ
+        # соседних глав — хвост предыдущей и начало новой делят одну физическую
+        # страницу. Для EPUB это намеренно: текст до заголовка остаётся в первой
+        # главе, текст после — во второй.
+        page_with_split = PageModel(
+            page=10,
+            content=EmbeddedContent(pagetext=""),
+            elements=[
+                BookElement(kind=_BODY_KIND, text="Хвост предыдущего текста", page=10),
+                BookElement(kind=_BODY_KIND, text="ВТОРАЯ БОЛЬШАЯ ГЛАВА КНИГИ", page=10),
+                BookElement(kind=_BODY_KIND, text="Начало второй главы", page=10),
+            ],
+        )
+        pages = [
+            _page(9, "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
+            page_with_split,
+        ]
+        chapters = split_into_chapters(pages, mode="strict")
+        titles = [ch.title for ch in chapters]
+        first = chapters[titles.index("ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ")]
+        second = chapters[titles.index("ВТОРАЯ БОЛЬШАЯ ГЛАВА КНИГИ")]
+        # Страница 10 присутствует в обеих соседних главах — это ожидаемо.
+        assert 10 in [p.page for p in first.pages]
+        assert 10 in [p.page for p in second.pages]
 
     def test_chapter_with_elements_has_nonempty_pages(self) -> None:
         # Каждая глава, у которой есть elements, должна иметь непустой pages.
