@@ -17,7 +17,6 @@ from biblioatom.errors import (
     FetchError,
     InputValidationError,
 )
-from biblioatom.models import StructuredDocument
 from biblioatom.services.source_utils import book_id_from_source
 
 runner = CliRunner()
