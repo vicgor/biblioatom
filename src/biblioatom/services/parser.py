@@ -1,19 +1,7 @@
 """Разбор HTML/JSON источника в доменные модели на selectolax.
 
-Перенос доменной логики парсинга из legacy ``fetch.py`` (``_BookPageParser``,
-``_clean_toc_text``, ``_parse_toc_html``) с заменой ``HTMLParser``/regex на
-selectolax. Сохранены доменные знания о структуре книги и оглавления:
-
-* метаданные страницы книги: заголовок (из ``<title>``) и максимальный номер
-  страницы (из атрибутов ``data-rel``);
-* структура TOC (``<aside data-type="tree-box-contents">``): мягкие переносы
-  (soft hyphen), неразрывные пробелы, автор, печатный номер страницы, уровень
-  вложенности.
-
-Разделение ответственности: ``parser`` извлекает структуру из HTML/JSON, а
-построение глав остаётся в ``structure_analyzer``. ``parse_embedded_content`` и
-``page_to_model`` уже реализованы в ``structure_analyzer`` — здесь они
-переиспользуются (делегируются), а не дублируются.
+Перенос доменной логики парсинга из legacy ``fetch.py`` с заменой ``HTMLParser``/regex на
+selectolax. Сохранены доменные знания о структуре книги и оглавления.
 
 Для нормализации идентификатора источника используйте
 :func:`~biblioatom.services.source_utils.book_id_from_source` из
@@ -34,52 +22,29 @@ from biblioatom.services import structure_analyzer
 
 _logger = get_logger(__name__)
 
-# Заголовок страницы книги имеет вид "<Название> / Просмотр…"; хвост отрезаем.
 _TITLE_SUFFIX_RE = re.compile(r"\s*/\s*Просмотр.*$", re.I)
 _WS_RE = re.compile(r"\s+")
 
-#: Символы, удаляемые/нормализуемые в тексте TOC.
 _SOFT_HYPHEN = "\u00ad"
 _NBSP = "\u00a0"
 
 
 def _clean_toc_text(value: str) -> str:
-    """Нормализовать текст записи TOC.
-
-    Убирает мягкие переносы (soft hyphen), заменяет неразрывные пробелы на
-    обычные и схлопывает пробельные последовательности. selectolax уже отдаёт
-    раскодированные HTML-сущности через ``.text()``, поэтому отдельный
-    ``html.unescape`` не нужен.
-    """
     s = value.replace(_SOFT_HYPHEN, "").replace(_NBSP, " ")
     return _WS_RE.sub(" ", s).strip()
 
 
 class Parser:
-    """Реализация :class:`~biblioatom.services.ParserProtocol` на selectolax.
-
-    :param settings: настройки парсинга (CSS-селекторы, ``fallback_max_page``).
-        ``FALLBACK_MAX_PAGE`` берётся из config, а не хардкодится.
-    """
+    """Реализация :class:`~biblioatom.services.ParserProtocol` на selectolax."""
 
     def __init__(self, settings: ParsingSettings | None = None) -> None:
         self._settings = settings or ParsingSettings()
 
-    # -- метаданные книги ---------------------------------------------------
-
     def parse_book_meta(self, html: str, book_id: str) -> BookMeta:
-        """Извлечь метаданные книги (:class:`BookMeta`) со страницы.
-
-        ``title`` берётся из ``<title>`` (с отрезанным служебным хвостом),
-        ``max_page`` — максимум среди атрибутов ``data-rel``. При отсутствии
-        данных используются безопасные значения: ``book_id`` и
-        ``fallback_max_page`` из config; в этом случае
-        ``page_count_is_fallback=True`` и пишется WARNING — чтобы «выдуманный»
-        предел не был тихим (вышестоящий код может предупредить о неполноте).
-        """
+        """Извлечь метаданные книги (:class:`BookMeta`) со страницы."""
         try:
             tree = HTMLParser(html)
-        except (ValueError, TypeError) as exc:  # pragma: no cover - selectolax надёжен
+        except (ValueError, TypeError) as exc:  # pragma: no cover
             raise ParseError(
                 "Failed to parse book meta HTML.", context={"book_id": book_id}
             ) from exc
@@ -114,27 +79,12 @@ class Parser:
         )
         return BookMeta(title=title, max_page=fallback, page_count_is_fallback=True)
 
-    # -- оглавление ---------------------------------------------------------
-
     def parse_toc(self, html: str) -> list[TocEntry]:
-        """Разобрать оглавление книги в список :class:`TocEntry`.
-
-        Парсит ``<aside data-type="tree-box-contents">``. Каждая ссылка с
-        атрибутами ``data-goto-page`` и ``data-level`` даёт запись:
-
-        * ``page`` — физический 0-based индекс страницы (``data-goto-page``);
-        * ``level`` — глубина вложенности (``data-level``);
-        * ``author`` — из ``span.info.author`` (опционально);
-        * ``print_page`` — печатный номер из ``span.info.pageno`` (как строка);
-        * ``title`` — текст ссылки за вычетом служебных span и блока ``<ins>``.
-
-        Пустой/отсутствующий TOC даёт пустой список (не ошибку).
-        """
+        """Разобрать оглавление книги в список :class:`TocEntry`."""
         tree = HTMLParser(html)
         aside = tree.css_first(self._settings.toc_selector)
         if aside is None:
             return []
-
         entries: list[TocEntry] = []
         for a in aside.css("a[data-goto-page][data-level]"):
             entry = self._parse_toc_link(a)
@@ -143,7 +93,6 @@ class Parser:
         return entries
 
     def _parse_toc_link(self, a: Node) -> TocEntry | None:
-        """Построить :class:`TocEntry` из одной ссылки TOC или вернуть ``None``."""
         page_raw = a.attributes.get("data-goto-page")
         level_raw = a.attributes.get("data-level")
         if page_raw is None or level_raw is None:
@@ -156,7 +105,6 @@ class Parser:
 
         author = ""
         print_page: str | None = None
-
         for span in a.css("span.info"):
             classes = (span.attributes.get("class") or "").split()
             text = _clean_toc_text(span.text())
@@ -165,9 +113,6 @@ class Parser:
             elif "pageno" in classes and text:
                 print_page = text
 
-        # Заголовок: текст ссылки за вычетом служебных span (author/pageno) и
-        # блока <ins>. Удаляем эти узлы из копии поддерева перед извлечением
-        # текста — это устойчивее строковых замен legacy-версии.
         for junk in a.css("span.info, ins"):
             junk.decompose()
         title = _clean_toc_text(a.text())
@@ -181,8 +126,6 @@ class Parser:
             print_page=print_page,
             level=level,
         )
-
-    # -- содержимое страницы (делегирование в structure_analyzer) ----------
 
     def parse_embedded_content(self, raw: str | dict[str, object] | None) -> EmbeddedContent:
         """Разобрать поле ``content`` страницы (делегирует structure_analyzer)."""
@@ -200,10 +143,7 @@ def fetch_all_pages(
     pages_html: list[str],
     toc_html: str | None = None,
 ) -> tuple[list[PageModel], list[TocEntry]]:
-    """Вспомогательная функция: разобрать список страниц и опциональный TOC.
-
-    Используется в тестах и в ``core/fetch_book.py`` для пакетной обработки.
-    """
+    """Разобрать список страниц и опциональный TOC."""
     from biblioatom.services import structure_analyzer as sa
 
     pages: list[PageModel] = []

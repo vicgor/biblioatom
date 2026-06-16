@@ -61,7 +61,6 @@ _IMAGE_MEDIA_TYPES = {
 
 def _media_type_for(path: Path) -> str:
     """Вернуть media-type изображения по расширению (по умолчанию JPEG)."""
-
     return _IMAGE_MEDIA_TYPES.get(path.suffix.lower(), "image/jpeg")
 
 
@@ -91,7 +90,6 @@ class EpubBuilder:
             для встраивания иллюстраций (если ``EpubSettings.embed_images``).
         :raises EpubBuildError: при сбое сборки/записи файла.
         """
-
         try:
             return self._build(document, out_path, images or [])
         except EpubBuildError:
@@ -101,6 +99,14 @@ class EpubBuilder:
             # (некорректные метаданные, битый манифест и т.п.).
             raise EpubBuildError(
                 "EbookLib reported an error while building the EPUB.",
+                context={"out_path": str(out_path), "error": str(exc)},
+            ) from exc
+        except (ValueError, TypeError) as exc:
+            # EbookLib может поднимать ValueError/TypeError при неожиданных
+            # типах данных (например, некорректный content у EpubHtml) или
+            # при ошибках сериализации манифеста. Оборачиваем в доменную ошибку.
+            raise EpubBuildError(
+                "Unexpected error while building the EPUB (bad data or EbookLib bug).",
                 context={"out_path": str(out_path), "error": str(exc)},
             ) from exc
         except OSError as exc:
@@ -174,8 +180,6 @@ class EpubBuilder:
         book.spine = [nav, *chapter_items]
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        # EpubWriter по умолчанию пишет EPUB 3.0 (package version="3.0",
-        # nav-документ с properties="nav"). Дополнительные опции не требуются.
         epub.write_epub(str(out_path), book)
 
         return BuildResult(
@@ -187,7 +191,6 @@ class EpubBuilder:
     @staticmethod
     def _index_images(images: list[ImageAsset]) -> dict[int, ImageAsset]:
         """Построить отображение страница → первый ассет (дедуп по странице)."""
-
         by_page: dict[int, ImageAsset] = {}
         for asset in images:
             by_page.setdefault(asset.page, asset)
@@ -206,7 +209,6 @@ class EpubBuilder:
         Возвращает XHTML-элемент и список ассетов изображений, фактически
         встроенных в этой главе (для накопления в ``BuildResult``).
         """
-
         title = chapter.title or f"Глава {idx}"
         body: list[str] = [f"<h2>{escape(title)}</h2>"]
         if chapter.author:
@@ -224,7 +226,6 @@ class EpubBuilder:
             if block.kind == ElementKind.FOOTNOTE:
                 footnotes.append(block)
                 n = len(footnotes)
-                # Маркер-ссылка на сноску в потоке текста.
                 body.append(
                     f'<sup><a id="ref_{n}" href="#fn_{n}" epub:type="noteref">[{n}]</a></sup>'
                 )
@@ -273,12 +274,7 @@ class EpubBuilder:
         embedded: dict[int, str],
         book: epub.EpubBook,
     ) -> str:
-        """Добавить изображение в манифест один раз и вернуть его href.
-
-        Дедупликация по номеру страницы: повторные подписи к одному изображению
-        не создают дублирующих записей в манифесте.
-        """
-
+        """Добавить изображение в манифест один раз и вернуть его href."""
         existing = embedded.get(asset.page)
         if existing is not None:
             return existing
@@ -295,17 +291,7 @@ class EpubBuilder:
         return file_name
 
     def _wrap_xhtml(self, title: str, body_html: str) -> bytes:
-        """Обернуть тело главы в well-formed XHTML с epub-namespace (bytes).
-
-        Возвращаются именно ``bytes``: lxml (используется EbookLib для повторного
-        разбора тела) отказывается принимать ``str`` с XML-декларацией кодировки.
-
-        Объявлен ``xmlns:epub`` — без него атрибуты ``epub:type`` (noteref/
-        footnote) сделали бы документ невалидным. Ссылка на CSS не вставляется
-        вручную: EbookLib сам добавит ``<link>`` для прикреплённого через
-        ``add_item`` stylesheet.
-        """
-
+        """Обернуть тело главы в well-formed XHTML с epub-namespace (bytes)."""
         lang = self._settings.language
         doc = (
             '<?xml version="1.0" encoding="utf-8"?>\n'
