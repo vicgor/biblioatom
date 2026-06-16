@@ -114,6 +114,27 @@ def _book_id_from_source(source: str) -> str:
     return cleaned
 
 
+def _load_book_from_json(path: Path) -> tuple[list, list, str, str, str | None]:
+    """Загрузить pages/toc/title/book_id/source из локального JSON (вывод fetch)."""
+    from biblioatom.models import PageModel, TocEntry
+
+    if not path.is_file():
+        raise InputValidationError(
+            "Input JSON file does not exist.",
+            context={"path": str(path)},
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    pages = [PageModel.model_validate(p) for p in data.get("pages", [])]
+    toc = [TocEntry.model_validate(t) for t in data.get("toc", [])]
+    return (
+        pages,
+        toc,
+        data.get("title", "Untitled"),
+        data.get("book_id", ""),
+        data.get("source"),
+    )
+
+
 @contextmanager
 def _handle_errors(*, verbose: bool) -> Iterator[None]:
     """Централизованно поймать доменные ошибки и завершить с нужным ExitCode.
@@ -130,9 +151,6 @@ def _handle_errors(*, verbose: bool) -> Iterator[None]:
         raise typer.Exit(code=130) from None
     except BookgrabError as exc:
         code = exit_code_for(exc)
-        # Логгер берём лениво (а не на уровне модуля): structlog кэширует logger
-        # при первом использовании, поэтому свежий вызов после setup_logging
-        # привязывается к актуальному потоку вывода.
         get_logger(__name__).error("cli.command_failed", error=str(exc), exit_code=int(code))
         if verbose:
             raise
@@ -268,7 +286,12 @@ def fetch(
 @app.command()
 def analyze(
     ctx: typer.Context,
-    source: Annotated[str, typer.Argument(help="Идентификатор книги или URL.")],
+    source: Annotated[
+        str,
+        typer.Argument(
+            help="Идентификатор книги, URL или путь к локальному JSON (вывод fetch)."
+        ),
+    ],
     chapter_mode: Annotated[
         ChapterMode,
         typer.Option("--chapter-mode", help="Режим разбивки на главы без TOC."),
@@ -278,33 +301,51 @@ def analyze(
         typer.Option("--json", help="Вывести структуру документа в JSON."),
     ] = False,
 ) -> None:
-    """Скачать книгу и проанализировать её структуру (главы/TOC)."""
+    """Проанализировать структуру книги (главы/TOC).
+
+    SOURCE может быть:
+    - идентификатором книги (``kapitsa_1994``) или URL — книга скачивается;
+    - путём к локальному ``.json``-файлу (вывод команды ``fetch``) — сеть не используется.
+    """
 
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
         from biblioatom.core.analyze_structure import analyze_structure
-        from biblioatom.core.fetch_book import fetch_book
 
-        book_id = _book_id_from_source(source)
-        fetcher = _build_fetcher(settings)
-        try:
-            book = fetch_book(
-                fetcher,
-                Parser(settings.parsing),
-                book_id,
-                delay_ms=settings.http.delay_ms,
-            )
-        finally:
-            fetcher.close()
+        local_path = Path(source)
+        if local_path.suffix.lower() == ".json" or local_path.is_file():
+            # Локальный JSON-файл — не идём в сеть.
+            pages, toc, title, book_id, file_source = _load_book_from_json(local_path)
+            resolved_source = file_source or source
+        else:
+            # Идентификатор или URL — скачиваем.
+            from biblioatom.core.fetch_book import fetch_book
+
+            book_id = _book_id_from_source(source)
+            fetcher = _build_fetcher(settings)
+            try:
+                book = fetch_book(
+                    fetcher,
+                    Parser(settings.parsing),
+                    book_id,
+                    delay_ms=settings.http.delay_ms,
+                )
+            finally:
+                fetcher.close()
+            pages = book.pages
+            toc = book.toc
+            title = book.title
+            book_id = book.book_id
+            resolved_source = source
 
         document = analyze_structure(
             StructureAnalyzer(chapter_mode.value),
-            book.pages,
-            book.toc,
-            title=book.title,
-            book_id=book.book_id,
-            source=source,
+            pages,
+            toc,
+            title=title,
+            book_id=book_id,
+            source=resolved_source,
         )
 
         if as_json:
@@ -379,25 +420,15 @@ def build(
     with _handle_errors(verbose=verbose):
         from biblioatom.core.analyze_structure import analyze_structure
         from biblioatom.core.build_epub import build_epub
-        from biblioatom.models import PageModel, TocEntry
 
-        if not input_json.is_file():
-            raise InputValidationError(
-                "Input JSON file does not exist.",
-                context={"path": str(input_json)},
-            )
-
-        data = json.loads(input_json.read_text(encoding="utf-8"))
-        pages = [PageModel.model_validate(p) for p in data.get("pages", [])]
-        toc = [TocEntry.model_validate(t) for t in data.get("toc", [])]
-
+        pages, toc, title, book_id, file_source = _load_book_from_json(input_json)
         document = analyze_structure(
             StructureAnalyzer(chapter_mode.value),
             pages,
             toc,
-            title=data.get("title", "Untitled"),
-            book_id=data.get("book_id", ""),
-            source=data.get("source"),
+            title=title,
+            book_id=book_id,
+            source=file_source,
         )
         result = build_epub(EpubBuilder(settings.epub), document, output)
         for path in result.outputs:
