@@ -83,9 +83,7 @@ def _collect_scans(scans_dir: Path) -> list[tuple[int, Path]]:
     при его отсутствии используется порядковый номер перебора.
     """
     image_exts = {".png", ".jpg", ".jpeg"}
-    candidates = [
-        p for p in scans_dir.glob("*") if p.suffix.lower() in image_exts
-    ]
+    candidates = [p for p in scans_dir.glob("*") if p.suffix.lower() in image_exts]
     candidates.sort(key=_natural_sort_key)
     result: list[tuple[int, Path]] = []
     for enum_idx, path in enumerate(candidates):
