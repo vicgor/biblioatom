@@ -79,7 +79,7 @@ class TestFetchCommand:
 
     def test_fetch_bad_source(self) -> None:
         result = runner.invoke(app, ["fetch", "https://example.com/no-book"])
-        assert result.exit_code == int(ExitCode.INPUT_VALIDATION_ERROR)
+        assert result.exit_code == int(ExitCode.INPUT_VALIDATION)
 
 
 class TestErrorMapping:
