@@ -17,7 +17,6 @@ from typer.testing import CliRunner
 
 from biblioatom import __version__
 from biblioatom.cli import app
-from biblioatom.services.parser import book_id_from_source
 from biblioatom.core.fetch_book import FetchedBook
 from biblioatom.errors import (
     ExitCode,
@@ -26,6 +25,7 @@ from biblioatom.errors import (
     InputValidationError,
 )
 from biblioatom.models import StructuredDocument
+from biblioatom.services.parser import book_id_from_source
 
 runner = CliRunner()
 
