@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from biblioatom.models import (
+    BookMeta,
     BuildResult,
     EmbeddedContent,
     ImageAsset,
@@ -24,8 +25,8 @@ from biblioatom.models import (
 class FetcherProtocol(Protocol):
     """Источник данных книги (сеть)."""
 
-    def fetch_book_meta(self, book_id: str) -> tuple[str, int]:
-        """Вернуть ``(title, max_page)`` для книги."""
+    def fetch_book_meta(self, book_id: str) -> BookMeta:
+        """Вернуть метаданные книги (:class:`BookMeta`)."""
         ...
 
     def fetch_toc(self, book_id: str) -> list[TocEntry]:
