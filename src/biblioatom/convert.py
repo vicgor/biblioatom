@@ -208,8 +208,8 @@ def is_probable_author_line(text):
     words = t.split()
     if len(words) < 2 or len(words) > 6:
         return False
-    initials = sum(1 for w in words if re.match(r"^[А-ЯA-Z]\.?[А-ЯA-Z]?\.$ ", w))
-    surname_like = any(re.match(r"^[А-ЯЁA-Z][а-яёa-z-]+$", w) for w in words)
+    initials = sum(1 for w in words if re.match(r"^[А-ЯA-Z]\.?[А-ЯA-Z]?\.$", w))
+    surname_like = any(re.match(r"^[А-ЯA-ZЁ][а-яa-zё-]+$", w) for w in words)
     return initials >= 1 and surname_like
 
 
