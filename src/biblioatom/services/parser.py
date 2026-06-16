@@ -28,6 +28,37 @@ from biblioatom.logging_config import get_logger
 from biblioatom.models import BookMeta, EmbeddedContent, PageModel, TocEntry
 from biblioatom.services import structure_analyzer
 
+
+def book_id_from_source(source: str) -> str:
+    """Извлечь идентификатор книги из URL или вернуть строку как есть.
+
+    Поддерживаются две формы::
+
+        kapitsa_1994
+        https://elib.biblioatom.ru/text/kapitsa_1994/
+
+    Принадлежит сервисному слою, а не CLI: при добавлении нового источника
+    данных (другой сайт, другая схема URL) логика меняется здесь, а CLI
+    остаётся неизменным.
+
+    :raises InputValidationError: если из строки не удалось извлечь идентификатор.
+    """
+    from biblioatom.errors import InputValidationError
+
+    cleaned = source.strip().rstrip("/")
+    if "/text/" in cleaned:
+        tail = cleaned.split("/text/", 1)[1]
+        candidate = tail.split("/", 1)[0]
+        if candidate:
+            return candidate
+    if "/" in cleaned or not cleaned:
+        raise InputValidationError(
+            "Could not derive a book id from the given source.",
+            context={"source": source},
+        )
+    return cleaned
+
+
 _logger = get_logger(__name__)
 
 # Заголовок страницы книги имеет вид "<Название> / Просмотр…"; хвост отрезаем.
@@ -197,4 +228,4 @@ class Parser:
         return structure_analyzer.page_to_model(page, content, print_page)
 
 
-__all__ = ["Parser"]
+__all__ = ["Parser", "book_id_from_source"]

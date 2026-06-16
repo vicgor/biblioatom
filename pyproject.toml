@@ -77,6 +77,10 @@ exclude = [
     "src/biblioatom/convert\\.py",
 ]
 
+# PIL (Pillow) намеренно НЕ включён в ignore_missing_imports:
+# Pillow >= 10 поставляет py.typed и inline-стабы, поэтому mypy проверяет
+# вызовы PIL-API напрямую — добавление PIL сюда заглушило бы реальные ошибки.
+# cv2, numpy, ebooklib, selectolax собственных стабов не имеют.
 [[tool.mypy.overrides]]
 module = ["cv2", "numpy.*", "ebooklib.*", "selectolax.*"]
 ignore_missing_imports = true

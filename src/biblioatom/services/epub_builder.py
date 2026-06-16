@@ -96,9 +96,18 @@ class EpubBuilder:
             return self._build(document, out_path, images or [])
         except EpubBuildError:
             raise
-        except Exception as exc:  # noqa: BLE001 — оборачиваем в доменную ошибку
+        except epub.EpubException as exc:
+            # EbookLib поднимает EpubException при внутренних ошибках сборки
+            # (некорректные метаданные, битый манифест и т.п.).
             raise EpubBuildError(
-                "Failed to build EPUB.",
+                "EbookLib reported an error while building the EPUB.",
+                context={"out_path": str(out_path), "error": str(exc)},
+            ) from exc
+        except OSError as exc:
+            # write_epub пишет ZIP на диск; read_bytes() читает файлы изображений.
+            # Оба могут поднять OSError (нет места, нет прав, битый путь).
+            raise EpubBuildError(
+                "I/O error while building the EPUB.",
                 context={"out_path": str(out_path), "error": str(exc)},
             ) from exc
 

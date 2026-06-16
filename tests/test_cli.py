@@ -16,7 +16,8 @@ import structlog
 from typer.testing import CliRunner
 
 from biblioatom import __version__
-from biblioatom.cli import _book_id_from_source, app
+from biblioatom.cli import app
+from biblioatom.services.parser import book_id_from_source
 from biblioatom.core.fetch_book import FetchedBook
 from biblioatom.errors import (
     ExitCode,
@@ -70,15 +71,15 @@ class TestGlobalOptions:
 
 class TestBookIdFromSource:
     def test_plain_id(self) -> None:
-        assert _book_id_from_source("kapitsa_1994") == "kapitsa_1994"
+        assert book_id_from_source("kapitsa_1994") == "kapitsa_1994"
 
     def test_url(self) -> None:
         url = "https://elib.biblioatom.ru/text/kapitsa_1994/p0/"
-        assert _book_id_from_source(url) == "kapitsa_1994"
+        assert book_id_from_source(url) == "kapitsa_1994"
 
     def test_bad_source_raises(self) -> None:
         with pytest.raises(InputValidationError):
-            _book_id_from_source("https://example.com/no-book-here")
+            book_id_from_source("https://example.com/no-book-here")
 
 
 def _fake_fetched_book() -> FetchedBook:

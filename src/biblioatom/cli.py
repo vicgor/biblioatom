@@ -35,7 +35,7 @@ from biblioatom.services.converter import EbookConvertConverter
 from biblioatom.services.epub_builder import EpubBuilder
 from biblioatom.services.fetcher import Fetcher
 from biblioatom.services.image_processor import ImageProcessor
-from biblioatom.services.parser import Parser
+from biblioatom.services.parser import Parser, book_id_from_source
 from biblioatom.services.scan_extractor import ScanExtractor
 from biblioatom.services.structure_analyzer import StructureAnalyzer
 from biblioatom.ui import console, err_console
@@ -95,26 +95,6 @@ def _collect_scans(scans_dir: Path) -> list[tuple[int, Path]]:
         result.append((page, path))
     return result
 
-
-def _book_id_from_source(source: str) -> str:
-    """Извлечь идентификатор книги из URL или вернуть строку как есть.
-
-    Поддерживаются формы ``kapitsa_1994`` и
-    ``https://elib.biblioatom.ru/text/kapitsa_1994/...``.
-    """
-
-    cleaned = source.strip().rstrip("/")
-    if "/text/" in cleaned:
-        tail = cleaned.split("/text/", 1)[1]
-        candidate = tail.split("/", 1)[0]
-        if candidate:
-            return candidate
-    if "/" in cleaned or not cleaned:
-        raise InputValidationError(
-            "Could not derive a book id from the given source.",
-            context={"source": source},
-        )
-    return cleaned
 
 
 def _load_book_from_json(
@@ -264,7 +244,7 @@ def fetch(
     with _handle_errors(verbose=verbose):
         from biblioatom.core.fetch_book import fetch_book
 
-        book_id = _book_id_from_source(source)
+        book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
         try:
             book = fetch_book(
@@ -332,7 +312,7 @@ def analyze(
             # Идентификатор или URL — скачиваем.
             from biblioatom.core.fetch_book import fetch_book
 
-            book_id = _book_id_from_source(source)
+            book_id = book_id_from_source(source)
             fetcher, parser = _build_fetcher(settings)
             try:
                 book = fetch_book(
@@ -516,7 +496,7 @@ def pipeline(
     with _handle_errors(verbose=verbose):
         from biblioatom.core.run_pipeline import run_pipeline
 
-        book_id = _book_id_from_source(source)
+        book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
         try:
             result = run_pipeline(

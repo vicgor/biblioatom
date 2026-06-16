@@ -14,7 +14,16 @@ from contextvars import ContextVar
 from typing import Any
 
 import structlog
-from structlog.types import EventDict, Processor
+from structlog.types import EventDict, FilteringBoundLogger, Processor
+
+#: Публичный псевдоним типа логгера, возвращаемого :func:`get_logger`.
+#:
+#: ``structlog.get_logger()`` аннотирован как ``Any`` в самой библиотеке
+#: (``BoundLoggerLazyProxy`` делегирует методы динамически), поэтому мы
+#: используем ``FilteringBoundLogger`` — Protocol из ``structlog.types``,
+#: объявляющий весь публичный API (info/debug/warning/error/…).
+#: Это позволяет mypy проверять вызовы логгера во всём проекте.
+BoundLogger = FilteringBoundLogger
 
 #: Идентификатор корреляции для связывания записей в рамках одной операции.
 _correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
@@ -110,14 +119,15 @@ def setup_logging(level: str = "INFO", *, json_logs: bool | None = None) -> None
     )
 
 
-def get_logger(name: str | None = None) -> Any:
+def get_logger(name: str | None = None) -> FilteringBoundLogger:
     """Вернуть structlog-логгер (опционально именованный)."""
 
-    return structlog.get_logger(name)
+    return structlog.get_logger(name)  # type: ignore[no-any-return]
 
 
 __all__ = [
     "add_correlation_id",
+    "BoundLogger",
     "get_logger",
     "redact_secrets",
     "set_correlation_id",
