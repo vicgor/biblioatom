@@ -7,6 +7,7 @@ from biblioatom.convert import (
     split_into_chapters,
     split_chapters_by_toc,
     find_photo_pages,
+    build_book,
 )
 
 
@@ -157,6 +158,107 @@ class TestFindPhotoPages(unittest.TestCase):
                     ) if html_page_no is not None else f'<p class="img">{caption}</p>',
                 },
             }]
+
+
+class TestPageToModel(unittest.TestCase):
+    def test_html_page_no_extracted(self):
+        item = {"page": 5, "content": {
+            "valid": True, "pagetext": "",
+            "pagehtml": '<p class="page-no">42</p><p class="text">Hello</p>'
+        }}
+        self.assertEqual(page_to_model(item)["html_page_no"], 42)
+
+    def test_html_page_no_none_when_absent(self):
+        item = {"page": 5, "content": {
+            "valid": True, "pagetext": "", "pagehtml": '<p class="text">Hello</p>'
+        }}
+        self.assertIsNone(page_to_model(item)["html_page_no"])
+
+
+class TestParseEmbeddedContent(unittest.TestCase):
+    def test_dict_passthrough(self):
+        d = {"valid": True, "pagetext": "x"}
+        self.assertIs(parse_embedded_content(d), d)
+
+    def test_json_string(self):
+        s = '{"valid": true, "pagetext": "hello"}'
+        self.assertEqual(parse_embedded_content(s)["pagetext"], "hello")
+
+    def test_invalid_string(self):
+        result = parse_embedded_content("not json")
+        self.assertFalse(result.get("valid"))
+
+    def test_none(self):
+        self.assertEqual(parse_embedded_content(None), {})
+
+
+class TestExtractBlocksFromHtml(unittest.TestCase):
+    def test_extracts_paragraph(self):
+        pagehtml = '<p class="text">Текст абзаца</p>'
+        blocks = extract_blocks_from_html(pagehtml)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["text"], "Текст абзаца")
+
+    def test_skips_page_no(self):
+        pagehtml = '<p class="page-no">5</p><p class="text">Текст</p>'
+        blocks = extract_blocks_from_html(pagehtml)
+        texts = [b["text"] for b in blocks]
+        self.assertNotIn("5", texts)
+        self.assertIn("Текст", texts)
+
+    def test_fallback_to_text(self):
+        blocks = extract_blocks_from_html("", fallback_text="Запасной текст")
+        self.assertEqual(blocks[0]["text"], "Запасной текст")
+
+
+class TestOutputStem(unittest.TestCase):
+    def test_basic(self):
+        src = {"title": "Моя Книга", "book_id": "my_book", "page_range": [0, 100]}
+        stem = output_stem(src)
+        self.assertIn("моя", stem)
+        self.assertIn("0-100", stem)
+
+    def test_prefix(self):
+        src = {"title": "Книга", "book_id": "book", "page_range": [0, 10]}
+        stem = output_stem(src, prefix="test")
+        self.assertTrue(stem.startswith("test"))
+
+
+class TestBuildTxt(unittest.TestCase):
+    def test_writes_file(self):
+        src = {
+            "title": "Тест",
+            "book_id": "test",
+            "source": "",
+            "page_range": [0, 1],
+            "generated_at": "",
+            "items": [
+                {"page": 0, "content": {"valid": True, "pagetext": "Страница ноль", "pagehtml": ""}},
+                {"page": 1, "content": {"valid": True, "pagetext": "Страница один", "pagehtml": ""}},
+            ],
+        }
+        pages = build_book_models(src)
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            path = Path(f.name)
+        build_txt(src, pages, path)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("Страница ноль", text)
+        self.assertIn("PAGE 0", text)
+        path.unlink()
+
+
+class TestBuildBook(unittest.TestCase):
+    def setUp(self):
+        self.src = {
+            "title": "Тестовая Книга",
+            "book_id": "test_book",
+            "source": "https://example.com/",
+            "page_range": [0, 2],
+            "generated_at": "2026-01-01T00:00:00",
+            "items": [
+                {"page": i, "content": {"valid": True, "pagetext": f"Текст страницы {i}", "pagehtml": ""}}
+                for i in range(3)
+            ],
         }
 
     def test_returns_photo_pages(self):
