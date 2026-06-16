@@ -56,3 +56,24 @@ def test_logging_level_normalized_to_uppercase(
     settings = get_settings()
 
     assert settings.logging.level == "DEBUG"
+
+
+def test_scan_extraction_filter_defaults() -> None:
+    """Группа сканов содержит все фильтры с дефолтами по умолчанию."""
+
+    settings = get_settings()
+    scan = settings.scan_extraction
+
+    assert 0 <= scan.min_area_ratio < scan.max_area_ratio <= 1
+    assert scan.min_aspect < scan.max_aspect
+    assert 0 <= scan.min_rectangularity <= 1
+    assert scan.crop_padding >= 0
+
+
+def test_even_blur_kernel_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Чётный размер ядра отклоняется валидатором конфига."""
+
+    monkeypatch.setenv("BIBLIOATOM_SCAN_EXTRACTION__BLUR_KERNEL", "4")
+
+    with pytest.raises(ConfigurationError):
+        get_settings()

@@ -107,6 +107,36 @@ class StructuredDocument(_Base):
     chapters: list[StructuredChapter] = Field(default_factory=list)
 
 
+class BoundingBox(_Base):
+    """Прямоугольная область на странице (в пикселях, начало координат — левый верх)."""
+
+    x: int = Field(ge=0)
+    y: int = Field(ge=0)
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+
+    @property
+    def area(self) -> int:
+        """Площадь рамки в пикселях."""
+
+        return self.width * self.height
+
+
+class ExtractedImage(_Base):
+    """Кроп иллюстрации, извлечённый из скана (в памяти, до постобработки).
+
+    Содержит сырые байты изображения и геометрию исходной рамки. Pydantic-поле
+    ``data`` хранит ``bytes`` (например, закодированный PNG/JPEG из OpenCV).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=False, arbitrary_types_allowed=True)
+
+    page: int = Field(ge=0)
+    data: bytes
+    box: BoundingBox
+    caption: str | None = None
+
+
 class ImageAsset(_Base):
     """Ассет изображения (иллюстрация/скан), привязанный к странице."""
 
@@ -128,9 +158,11 @@ class BuildResult(_Base):
 __all__ = [
     "BookElement",
     "BookMeta",
+    "BoundingBox",
     "BuildResult",
     "ElementKind",
     "EmbeddedContent",
+    "ExtractedImage",
     "ImageAsset",
     "PageModel",
     "StructuredChapter",
