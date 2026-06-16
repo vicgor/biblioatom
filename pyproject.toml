@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-biblioatom = "biblioatom.cli:main"
+biblioatom = "biblioatom.cli:app"
 
 [project.urls]
 Repository = "https://github.com/vicgor/biblioatom"
@@ -53,10 +53,10 @@ packages = ["src/biblioatom"]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
-# Легаси stdlib-модули и их тесты остаются нетронутыми как эталон для
-# следующих этапов миграции — исключаем их из линтинга и форматирования.
+# Легаси stdlib-модули (fetch/convert) и их тесты остаются нетронутыми как
+# исторический эталон — исключаем их из линтинга и форматирования. cli.py и
+# __main__.py переписаны на Typer (Этап 6) и снова под линтером.
 extend-exclude = [
-    "src/biblioatom/cli.py",
     "src/biblioatom/fetch.py",
     "src/biblioatom/convert.py",
     "tests/test_convert.py",
@@ -69,13 +69,12 @@ select = ["E", "F", "I", "UP", "B", "SIM", "PT", "A"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Легаси stdlib-модули (cli/fetch/convert) переносятся на новый стек в следующих
-# этапах; пока исключаем их из strict-проверки, чтобы каркас был зелёным.
+# Легаси stdlib-модули (fetch/convert) — исторический эталон, исключены из
+# strict-проверки. cli.py и __main__.py переписаны на Typer (Этап 6) и проходят
+# strict.
 exclude = [
-    "src/biblioatom/cli\\.py",
     "src/biblioatom/fetch\\.py",
     "src/biblioatom/convert\\.py",
-    "src/biblioatom/__main__\\.py",
 ]
 
 [[tool.mypy.overrides]]
