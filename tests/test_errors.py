@@ -1,7 +1,8 @@
-"""Smoke-тесты иерархии ошибок и маппинга в коды завершения."""
+"""Smoke-тесты иерархии ошибок, маппинга в коды завершения и политики ретраев."""
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from biblioatom.errors import (
@@ -82,3 +83,51 @@ def test_exit_codes_are_stable() -> None:
     assert ExitCode.IMAGE == 7
     assert ExitCode.EPUB_BUILD == 8
     assert ExitCode.EXTERNAL_TOOL == 10
+
+
+class TestRetryPolicy:
+    """Политика ретраев: повтор только для транзиентных сбоев.
+
+    Дополняет интеграционные сетевые тесты (``test_fetcher.py``) проверкой самого
+    предиката :meth:`Fetcher._is_retryable` на уровне ошибок: таймаут/транспорт/
+    retryable-статус → повтор; валидация/конфиг/парсинг/отсутствие бинаря → нет.
+    """
+
+    def _request(self) -> httpx.Request:
+        return httpx.Request("GET", "https://example.com/")
+
+    def test_timeout_is_retryable(self) -> None:
+        from biblioatom.services.fetcher import Fetcher
+
+        assert Fetcher._is_retryable(httpx.TimeoutException("slow", request=self._request()))
+
+    def test_transport_error_is_retryable(self) -> None:
+        from biblioatom.services.fetcher import Fetcher
+
+        assert Fetcher._is_retryable(httpx.ConnectError("down", request=self._request()))
+
+    def test_retryable_status_wrapper_is_retryable(self) -> None:
+        from biblioatom.services.fetcher import Fetcher, _RetryableStatus
+
+        response = httpx.Response(503, request=self._request())
+        assert Fetcher._is_retryable(_RetryableStatus(response))
+
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            ResourceNotFoundError("404"),
+            InputValidationError("bad range"),
+            ConfigurationError("bad env"),
+            ParseError("bad html"),
+            ExternalToolNotFoundError("no calibre"),
+            httpx.HTTPStatusError(
+                "404",
+                request=httpx.Request("GET", "https://example.com/"),
+                response=httpx.Response(404, request=httpx.Request("GET", "https://example.com/")),
+            ),
+        ],
+    )
+    def test_non_transient_errors_are_not_retryable(self, exc: BaseException) -> None:
+        from biblioatom.services.fetcher import Fetcher
+
+        assert not Fetcher._is_retryable(exc)
