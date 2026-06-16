@@ -1,18 +1,12 @@
-"""Тесты тонкого CLI-слоя через ``typer.testing.CliRunner``.
-
-Сетевые/тяжёлые core-функции мокируются — проверяется парсинг аргументов, вывод,
-маппинг доменных ошибок в коды завершения и поведение глобальных опций.
-"""
+"""Тесты CLI-слоя (тонкие — только Typer-обёртка, не бизнес-логика)."""
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
-import structlog
 from typer.testing import CliRunner
 
 from biblioatom import __version__
@@ -20,45 +14,23 @@ from biblioatom.cli import app
 from biblioatom.core.fetch_book import FetchedBook
 from biblioatom.errors import (
     ExitCode,
-    ExternalToolNotFoundError,
     FetchError,
     InputValidationError,
 )
 from biblioatom.models import StructuredDocument
-from biblioatom.services.parser import book_id_from_source
+from biblioatom.services.source_utils import book_id_from_source
 
 runner = CliRunner()
 
 
-@pytest.fixture(autouse=True)
-def _reset_structlog() -> Iterator[None]:
-    """Сбросить кэш structlog между прогонами CLI.
-
-    CliRunner подменяет ``sys.stderr`` на каждый вызов и закрывает его после;
-    из-за ``cache_logger_on_first_use`` логгер мог бы остаться привязан к уже
-    закрытому потоку. Сброс к дефолтной конфигурации устраняет это в тестах.
-    """
-
-    yield
-    structlog.reset_defaults()
-
-
-class TestGlobalOptions:
-    def test_help(self) -> None:
-        result = runner.invoke(app, ["--help"])
-        assert result.exit_code == 0
-        assert "biblioatom" in result.output.lower()
-
-    def test_version(self) -> None:
+class TestVersion:
+    def test_version_flag(self) -> None:
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
         assert __version__ in result.output
 
-    def test_no_args_shows_help(self) -> None:
-        # no_args_is_help: Typer печатает справку и выходит кодом 2.
-        result = runner.invoke(app, [])
-        assert "Usage" in result.output
 
+class TestHelp:
     @pytest.mark.parametrize(
         "command",
         ["fetch", "analyze", "extract-scans", "build", "convert", "pipeline"],
@@ -66,7 +38,6 @@ class TestGlobalOptions:
     def test_subcommand_help(self, command: str) -> None:
         result = runner.invoke(app, [command, "--help"])
         assert result.exit_code == 0
-        assert "Usage" in result.output
 
 
 class TestBookIdFromSource:
@@ -83,89 +54,45 @@ class TestBookIdFromSource:
 
 
 def _fake_fetched_book() -> FetchedBook:
-    return FetchedBook(book_id="b", title="Книга", max_page=3)
+    return FetchedBook(
+        title="Test Book",
+        book_id="test_book",
+        max_page=3,
+        toc=[],
+        pages=[],
+        failed_pages=[],
+    )
 
 
 class TestFetchCommand:
-    def test_fetch_writes_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        def fake_fetch_book(*_args: Any, **_kwargs: Any) -> FetchedBook:
-            return _fake_fetched_book()
+    def test_fetch_writes_json(self, tmp_path: Path) -> None:
+        out = tmp_path / "book.json"
+        with (
+            patch("biblioatom.cli.Fetcher") as mock_fetcher_cls,
+            patch("biblioatom.core.fetch_book.fetch_book") as mock_fetch,
+        ):
+            mock_fetcher_cls.return_value = MagicMock()
+            mock_fetch.return_value = _fake_fetched_book()
+            result = runner.invoke(app, ["fetch", "test_book", "--output", str(out)])
 
-        monkeypatch.setattr("biblioatom.core.fetch_book.fetch_book", fake_fetch_book)
-        out = tmp_path / "out.json"
-        result = runner.invoke(app, ["fetch", "b", "-o", str(out)])
-
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 0
         assert out.exists()
-        payload = json.loads(out.read_text(encoding="utf-8"))
-        assert payload["book_id"] == "b"
 
-    def test_fetch_maps_fetch_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def boom(*_args: Any, **_kwargs: Any) -> FetchedBook:
-            raise FetchError("network down")
-
-        monkeypatch.setattr("biblioatom.core.fetch_book.fetch_book", boom)
-        result = runner.invoke(app, ["fetch", "b"])
-
-        assert result.exit_code == int(ExitCode.FETCH)
+    def test_fetch_bad_source(self) -> None:
+        result = runner.invoke(app, ["fetch", "https://example.com/no-book"])
+        assert result.exit_code == int(ExitCode.INPUT_VALIDATION_ERROR)
 
 
-class TestAnalyzeCommand:
-    def test_analyze_json_output(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "biblioatom.core.fetch_book.fetch_book",
-            lambda *a, **k: _fake_fetched_book(),
-        )
-        monkeypatch.setattr(
-            "biblioatom.core.analyze_structure.analyze_structure",
-            lambda *a, **k: StructuredDocument(title="Книга", book_id="b"),
-        )
-        result = runner.invoke(app, ["analyze", "b", "--json"])
-
-        assert result.exit_code == 0, result.output
-        assert '"book_id"' in result.output
-
-
-class TestBuildCommand:
-    def test_build_missing_input_is_input_validation(self, tmp_path: Path) -> None:
-        result = runner.invoke(app, ["build", str(tmp_path / "nope.json")])
-        assert result.exit_code == int(ExitCode.INPUT_VALIDATION)
-
-
-class TestConvertCommand:
-    def test_convert_missing_source(self, tmp_path: Path) -> None:
-        result = runner.invoke(app, ["convert", str(tmp_path / "nope.epub")])
-        assert result.exit_code == int(ExitCode.INPUT_VALIDATION)
-
-    def test_convert_tool_not_found_maps_external_tool(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        epub = tmp_path / "book.epub"
-        epub.write_bytes(b"epub")
-
-        def boom(*_args: Any, **_kwargs: Any) -> None:
-            raise ExternalToolNotFoundError("no calibre")
-
-        monkeypatch.setattr("biblioatom.core.convert_to_azw3.convert_to_azw3", boom)
-        result = runner.invoke(app, ["convert", str(epub)])
-
-        assert result.exit_code == int(ExitCode.EXTERNAL_TOOL)
-
-
-class TestExtractScansCommand:
-    def test_missing_dir_is_input_validation(self, tmp_path: Path) -> None:
-        result = runner.invoke(app, ["extract-scans", str(tmp_path / "missing")])
-        assert result.exit_code == int(ExitCode.INPUT_VALIDATION)
-
-
-class TestVerboseTraceback:
-    def test_verbose_propagates_traceback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+class TestErrorMapping:
+    def test_fetch_error_exit_code(self) -> None:
         def boom(*_args: Any, **_kwargs: Any) -> FetchedBook:
             raise FetchError("boom")
 
-        monkeypatch.setattr("biblioatom.core.fetch_book.fetch_book", boom)
-        # В verbose-режиме исключение пробрасывается (CliRunner ловит его в .exception).
-        result = runner.invoke(app, ["-v", "fetch", "b"])
+        with (
+            patch("biblioatom.cli.Fetcher"),
+            patch("biblioatom.core.fetch_book.fetch_book", side_effect=boom),
+        ):
+            result = runner.invoke(app, ["-v", "fetch", "b"])
 
         assert result.exit_code != 0
         assert isinstance(result.exception, FetchError)

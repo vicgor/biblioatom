@@ -14,6 +14,10 @@ selectolax. Сохранены доменные знания о структур
 построение глав остаётся в ``structure_analyzer``. ``parse_embedded_content`` и
 ``page_to_model`` уже реализованы в ``structure_analyzer`` — здесь они
 переиспользуются (делегируются), а не дублируются.
+
+Для нормализации идентификатора источника используйте
+:func:`~biblioatom.services.source_utils.book_id_from_source` из
+:mod:`biblioatom.services.source_utils`.
 """
 
 from __future__ import annotations
@@ -28,37 +32,6 @@ from biblioatom.logging_config import get_logger
 from biblioatom.models import BookMeta, EmbeddedContent, PageModel, TocEntry
 from biblioatom.services import structure_analyzer
 
-
-def book_id_from_source(source: str) -> str:
-    """Извлечь идентификатор книги из URL или вернуть строку как есть.
-
-    Поддерживаются две формы::
-
-        kapitsa_1994
-        https://elib.biblioatom.ru/text/kapitsa_1994/
-
-    Принадлежит сервисному слою, а не CLI: при добавлении нового источника
-    данных (другой сайт, другая схема URL) логика меняется здесь, а CLI
-    остаётся неизменным.
-
-    :raises InputValidationError: если из строки не удалось извлечь идентификатор.
-    """
-    from biblioatom.errors import InputValidationError
-
-    cleaned = source.strip().rstrip("/")
-    if "/text/" in cleaned:
-        tail = cleaned.split("/text/", 1)[1]
-        candidate = tail.split("/", 1)[0]
-        if candidate:
-            return candidate
-    if "/" in cleaned or not cleaned:
-        raise InputValidationError(
-            "Could not derive a book id from the given source.",
-            context={"source": source},
-        )
-    return cleaned
-
-
 _logger = get_logger(__name__)
 
 # Заголовок страницы книги имеет вид "<Название> / Просмотр…"; хвост отрезаем.
@@ -66,8 +39,8 @@ _TITLE_SUFFIX_RE = re.compile(r"\s*/\s*Просмотр.*$", re.I)
 _WS_RE = re.compile(r"\s+")
 
 #: Символы, удаляемые/нормализуемые в тексте TOC.
-_SOFT_HYPHEN = "­"
-_NBSP = " "
+_SOFT_HYPHEN = "\u00ad"
+_NBSP = "\u00a0"
 
 
 def _clean_toc_text(value: str) -> str:
@@ -78,7 +51,6 @@ def _clean_toc_text(value: str) -> str:
     раскодированные HTML-сущности через ``.text()``, поэтому отдельный
     ``html.unescape`` не нужен.
     """
-
     s = value.replace(_SOFT_HYPHEN, "").replace(_NBSP, " ")
     return _WS_RE.sub(" ", s).strip()
 
@@ -105,7 +77,6 @@ class Parser:
         ``page_count_is_fallback=True`` и пишется WARNING — чтобы «выдуманный»
         предел не был тихим (вышестоящий код может предупредить о неполноте).
         """
-
         try:
             tree = HTMLParser(html)
         except (ValueError, TypeError) as exc:  # pragma: no cover - selectolax надёжен
@@ -159,7 +130,6 @@ class Parser:
 
         Пустой/отсутствующий TOC даёт пустой список (не ошибку).
         """
-
         tree = HTMLParser(html)
         aside = tree.css_first(self._settings.toc_selector)
         if aside is None:
@@ -174,7 +144,6 @@ class Parser:
 
     def _parse_toc_link(self, a: Node) -> TocEntry | None:
         """Построить :class:`TocEntry` из одной ссылки TOC или вернуть ``None``."""
-
         page_raw = a.attributes.get("data-goto-page")
         level_raw = a.attributes.get("data-level")
         if page_raw is None or level_raw is None:
@@ -217,15 +186,45 @@ class Parser:
 
     def parse_embedded_content(self, raw: str | dict[str, object] | None) -> EmbeddedContent:
         """Разобрать поле ``content`` страницы (делегирует structure_analyzer)."""
-
         return structure_analyzer.parse_embedded_content(raw)
 
     def page_to_model(
         self, page: int, content: EmbeddedContent, print_page: str | None = None
     ) -> PageModel:
         """Построить :class:`PageModel` из содержимого (делегирует structure_analyzer)."""
-
         return structure_analyzer.page_to_model(page, content, print_page)
 
 
-__all__ = ["Parser", "book_id_from_source"]
+def fetch_all_pages(
+    parser: Parser,
+    pages_html: list[str],
+    toc_html: str | None = None,
+) -> tuple[list[PageModel], list[TocEntry]]:
+    """Вспомогательная функция: разобрать список страниц и опциональный TOC.
+
+    Используется в тестах и в ``core/fetch_book.py`` для пакетной обработки.
+    """
+    from biblioatom.services import structure_analyzer as sa
+
+    pages: list[PageModel] = []
+    for idx, html in enumerate(pages_html):
+        content = parser.parse_embedded_content(html)
+        pages.append(sa.page_to_model(idx, content))
+
+    toc: list[TocEntry] = []
+    if toc_html is not None:
+        toc = parser.parse_toc(toc_html)
+
+    return pages, toc
+
+
+def page_to_model(
+    page: int,
+    content: EmbeddedContent,
+    print_page: str | None = None,
+) -> PageModel:
+    """Модульный псевдоним для :meth:`Parser.page_to_model` (без экземпляра)."""
+    return structure_analyzer.page_to_model(page, content, print_page)
+
+
+__all__ = ["Parser", "fetch_all_pages", "page_to_model"]
