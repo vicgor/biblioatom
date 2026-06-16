@@ -180,8 +180,13 @@ def run_pipeline(
     images: list[ImageAsset] = []
     failed_scans: list[Path] = []
     if extract_images:
-        assert scan_extractor is not None
-        assert image_processor is not None
+        # Валидация уже выполнена выше (InputValidationError при None), но mypy
+        # не умеет проследить эту связь через флаг — сужаем тип явно.
+        if scan_extractor is None or image_processor is None:
+            raise InputValidationError(
+                "Image extraction requires both a scan extractor and an image processor.",
+                context={"book_id": book_id},
+            )
         target_dir = images_dir or out_path.parent / "images"
         scan_result = _extract_images(fetcher, scan_extractor, image_processor, book, target_dir)
         images = scan_result.images
@@ -192,7 +197,11 @@ def run_pipeline(
 
     azw3_out: Path | None = None
     if convert_azw3:
-        assert converter is not None
+        if converter is None:
+            raise InputValidationError(
+                "AZW3 conversion requires a converter service.",
+                context={"book_id": book_id},
+            )
         azw3_out = azw3_path or epub_path.with_suffix(".azw3")
         convert_to_azw3(converter, epub_path, azw3_out, book_id=book.book_id)
 

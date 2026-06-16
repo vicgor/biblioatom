@@ -171,11 +171,16 @@ def _load_settings(config_file: Path | None) -> Settings:
     return get_settings()
 
 
-def _build_fetcher(settings: Settings) -> Fetcher:
-    """Собрать ``Fetcher`` с парсером и HTTP-настройками из конфигурации."""
+def _build_fetcher(settings: Settings) -> tuple[Fetcher, Parser]:
+    """Собрать ``Fetcher`` и ``Parser`` из конфигурации.
+
+    Возвращает пару ``(fetcher, parser)``, чтобы один экземпляр ``Parser``
+    использовался и внутри ``Fetcher``, и при вызовах use case — без дублирования.
+    """
 
     parser = Parser(settings.parsing)
-    return Fetcher(app=settings.app, http=settings.http, parser=parser)
+    fetcher = Fetcher(app=settings.app, http=settings.http, parser=parser)
+    return fetcher, parser
 
 
 def _version_callback(value: bool) -> None:
@@ -260,11 +265,11 @@ def fetch(
         from biblioatom.core.fetch_book import fetch_book
 
         book_id = _book_id_from_source(source)
-        fetcher = _build_fetcher(settings)
+        fetcher, parser = _build_fetcher(settings)
         try:
             book = fetch_book(
                 fetcher,
-                Parser(settings.parsing),
+                parser,
                 book_id,
                 from_page=from_page,
                 to_page=to_page,
@@ -328,11 +333,11 @@ def analyze(
             from biblioatom.core.fetch_book import fetch_book
 
             book_id = _book_id_from_source(source)
-            fetcher = _build_fetcher(settings)
+            fetcher, parser = _build_fetcher(settings)
             try:
                 book = fetch_book(
                     fetcher,
-                    Parser(settings.parsing),
+                    parser,
                     book_id,
                     delay_ms=settings.http.delay_ms,
                 )
@@ -512,11 +517,11 @@ def pipeline(
         from biblioatom.core.run_pipeline import run_pipeline
 
         book_id = _book_id_from_source(source)
-        fetcher = _build_fetcher(settings)
+        fetcher, parser = _build_fetcher(settings)
         try:
             result = run_pipeline(
                 fetcher=fetcher,
-                parser=Parser(settings.parsing),
+                parser=parser,
                 analyzer=StructureAnalyzer(chapter_mode.value),
                 epub_builder=EpubBuilder(settings.epub),
                 book_id=book_id,

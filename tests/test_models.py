@@ -29,7 +29,8 @@ def test_book_element() -> None:
 
 
 def test_element_kind_values() -> None:
-    assert ElementKind.LIST == "list_"
+    # Член переименован в LIST_ (underscore в имени), значение исправлено на "list".
+    assert ElementKind.LIST_ == "list"
     assert ElementKind.HEADING == "heading"
 
 

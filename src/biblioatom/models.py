@@ -23,9 +23,11 @@ class ElementKind(StrEnum):
     QUOTE = "quote"
     SIDEBAR = "sidebar"
     HEADING = "heading"
-    # Trailing underscore в имени — из-за конфликта с builtin 'list'; член имеет
-    # неочевидное сериализованное значение "list_" (не "list").
-    LIST = "list_"
+    # Trailing underscore в имени члена — чтобы не конфликтовать с builtin 'list'
+    # в области видимости, где StrEnum-члены используются без квалификатора.
+    # Сериализованное значение явно задано как "list" (без underscore), чтобы
+    # JSON-представление было человекочитаемым и предсказуемым.
+    LIST_ = "list"
     TABLE = "table"
 
 
