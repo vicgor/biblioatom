@@ -25,3 +25,6 @@ output/*.fb2
 output/*.html
 output/*.txt
 !README.md
+.DS_Store
+*.epub
+book*.json

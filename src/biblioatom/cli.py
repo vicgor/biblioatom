@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
@@ -39,6 +39,9 @@ from biblioatom.services.parser import Parser
 from biblioatom.services.scan_extractor import ScanExtractor
 from biblioatom.services.structure_analyzer import StructureAnalyzer
 from biblioatom.ui import console, err_console
+
+if TYPE_CHECKING:
+    from biblioatom.models import PageModel, TocEntry
 
 app = typer.Typer(
     name="biblioatom",
@@ -114,7 +117,9 @@ def _book_id_from_source(source: str) -> str:
     return cleaned
 
 
-def _load_book_from_json(path: Path) -> tuple[list, list, str, str, str | None]:
+def _load_book_from_json(
+    path: Path,
+) -> tuple[list[PageModel], list[TocEntry], str, str, str | None]:
     """Загрузить pages/toc/title/book_id/source из локального JSON (вывод fetch)."""
     from biblioatom.models import PageModel, TocEntry
 
