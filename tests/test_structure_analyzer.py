@@ -176,6 +176,84 @@ class TestSplitIntoChapters:
         chapter = next(ch for ch in chapters if ch.title == "ГЛАВА ПЕРВАЯ НАЧАЛО")
         assert chapter.author == "Боровик-Романов А. С."
 
+    def test_pages_populated_no_page_lost(self) -> None:
+        # Регресс (blocking #3): split_into_chapters обязан заполнять
+        # chapter.pages. Сумма страниц по всем главам = числу входных страниц,
+        # ни одна не теряется и не дублируется.
+        pages = [
+            _page(1, "Предисловие к изданию"),
+            _page(10, "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
+            _page(11, "Текст первой главы продолжается"),
+            _page(20, "ВТОРАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
+            _page(21, "Текст второй главы"),
+        ]
+        chapters = split_into_chapters(pages, mode="strict")
+
+        collected = [p.page for ch in chapters for p in ch.pages]
+        assert sorted(collected) == [1, 10, 11, 20, 21]
+        assert len(collected) == len(pages)  # без дублей и пропусков
+
+    def test_chapter_with_elements_has_nonempty_pages(self) -> None:
+        # Каждая глава, у которой есть elements, должна иметь непустой pages.
+        pages = [
+            _page(10, "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
+            _page(11, "Содержательный текст главы"),
+        ]
+        chapters = split_into_chapters(pages, mode="strict")
+        for ch in chapters:
+            if ch.elements:
+                assert ch.pages, f"глава {ch.title!r} имеет elements, но пустой pages"
+
+    def test_multi_block_page_not_duplicated_in_pages(self) -> None:
+        # Страница с несколькими блоками должна попасть в chapter.pages один раз.
+        page = PageModel(
+            page=15,
+            content=EmbeddedContent(pagetext=""),
+            elements=[
+                BookElement(kind=_BODY_KIND, text="Первый абзац страницы", page=15),
+                BookElement(kind=_BODY_KIND, text="Второй абзац страницы", page=15),
+                BookElement(kind=_BODY_KIND, text="Третий абзац страницы", page=15),
+            ],
+        )
+        chapters = split_into_chapters([page], mode="strict")
+        assert len(chapters) == 1
+        assert [p.page for p in chapters[0].pages] == [15]
+
+    def test_front_matter_with_pages_but_no_heading_merged(self) -> None:
+        # Регресс (blocking #2): front-matter с реальными pages, но без
+        # «настоящего» заголовка (только body-текст) сливается, как только
+        # появляется содержательная глава. Сам front-matter без elements не
+        # должен оставаться отдельной главой, но его страницы не теряются —
+        # они остаются в потоке (front-matter тут несёт текст → elements есть).
+        pages = [
+            _page(1, "Вступительный текст без заголовка"),
+            _page(10, "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
+            _page(11, "Тело главы"),
+        ]
+        chapters = split_into_chapters(pages, mode="strict")
+        # Front-matter здесь содержит elements (вступительный текст), поэтому
+        # сохраняется как отдельная глава с непустыми pages.
+        front = chapters[0]
+        assert front.title == "Front Matter"
+        assert front.elements
+        assert [p.page for p in front.pages] == [1]
+
+    def test_empty_front_matter_dropped_when_content_follows(self) -> None:
+        # Front-matter без значимых блоков (страница лишь с номером page-no →
+        # пустой elements) отбрасывается при наличии содержательной главы.
+        pages = [
+            PageModel(
+                page=1,
+                content=EmbeddedContent(pagetext=""),
+                elements=[BookElement(kind=_BODY_KIND, text="   ", page=1)],
+            ),
+            _page(10, "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"),
+            _page(11, "Тело главы"),
+        ]
+        chapters = split_into_chapters(pages, mode="strict")
+        assert all(ch.title != "Front Matter" for ch in chapters)
+        assert chapters[0].title == "ПЕРВАЯ БОЛЬШАЯ ГЛАВА КНИГИ"
+
 
 class TestSplitByToc:
     def test_splits_on_toc_page_boundaries(self) -> None:

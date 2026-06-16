@@ -35,6 +35,9 @@ from biblioatom.services.html_cleaner import (
     strip_tags_preserve_text,
 )
 
+# Нормализованные ключи служебных front-matter заголовков (uppercase, Ё→Е).
+# Кандидат на вынос в config (Этап 3+); пока оставлено модульной константой,
+# чтобы не протаскивать config в чистые функции анализа.
 FRONT_MATTER_TITLES = {
     "ОБЛОЖКА",
     "ФРОНТИСПИС",
@@ -230,10 +233,13 @@ def should_start_chapter(text: str, page_no: int, mode: str) -> bool:
         return False
     if mode == "normal":
         return True
+    # Ключ нормализуется один раз и переиспользуется: сравниваем его с
+    # FRONT_MATTER_TITLES напрямую вместо повторной нормализации в
+    # is_front_matter_heading.
     key = normalized_heading_key(text)
     if page_no < STRICT_MIN_PAGE_FOR_CHAPTER:
         return False
-    if is_front_matter_heading(key):
+    if key in FRONT_MATTER_TITLES:
         return False
     return not (len(key.split()) <= 2 and not key.endswith(":"))
 
@@ -248,8 +254,17 @@ def split_into_chapters(pages: list[PageModel], mode: str = "strict") -> list[St
 
     chapters: list[StructuredChapter] = []
     current = StructuredChapter(title="Front Matter")
-    current_page_nums: list[int] = []
+    # Аккумулируем сами объекты PageModel (а не только их номера), чтобы
+    # установить ``current.pages`` — иначе поле остаётся пустым и downstream
+    # (EPUB-builder, CLI) теряет содержимое. Порядок добавления = порядок входа.
+    current_pages: list[PageModel] = []
     pending_author = ""
+
+    def _attach_page(pg: PageModel) -> None:
+        # Каждая страница принадлежит ровно одной главе; одну и ту же страницу
+        # не добавляем дважды (страница может содержать несколько блоков).
+        if not current_pages or current_pages[-1].page != pg.page:
+            current_pages.append(pg)
 
     for pg in pages:
         elements = pg.elements
@@ -273,37 +288,45 @@ def split_into_chapters(pages: list[PageModel], mode: str = "strict") -> list[St
                     continue
 
             if block.kind == _BODY_KIND and should_start_chapter(btext, pg.page, mode):
-                if current.elements or current_page_nums:
+                if current.elements or current_pages:
+                    current.pages = current_pages
                     chapters.append(current)
                 current = StructuredChapter(
                     title=strip_heading_marks(btext),
                     author=pending_author or None,
                 )
-                current_page_nums = [pg.page]
+                current_pages = [pg]
                 pending_author = ""
                 i += 1
                 continue
 
-            if pg.page not in current_page_nums:
-                current_page_nums.append(pg.page)
+            _attach_page(pg)
             current.elements.append(BookElement(kind=block.kind, text=btext, page=pg.page))
             i += 1
 
-    if current.elements or current_page_nums:
+    if current.elements or current_pages:
+        current.pages = current_pages
         chapters.append(current)
 
     return _merge_empty_front_matter(chapters)
 
 
 def _merge_empty_front_matter(chapters: list[StructuredChapter]) -> list[StructuredChapter]:
-    """Слить пустой front-matter с первой содержательной главой."""
+    """Отбросить front-matter, не содержащий блоков основного текста.
 
-    cleaned = [ch for ch in chapters if ch.elements or ch.pages]
-    if len(cleaned) >= 2 and cleaned[0].title == "Front Matter" and not cleaned[0].elements:
-        # У первой содержательной главы расширяем диапазон страниц вниз — пустой
-        # front-matter не должен порождать отдельную главу.
-        return cleaned[1:]
-    return cleaned
+    «Пустой» front-matter — глава с заголовком ``"Front Matter"`` без ни одного
+    ``BookElement`` (даже если за ней закреплены ``pages``: страница без значимых
+    блоков, например только номер страницы). Такой служебный раздел не должен
+    порождать отдельную главу при наличии хотя бы одной содержательной.
+
+    После фикса аккумуляции ``pages`` (см. :func:`split_into_chapters`)
+    front-matter теперь почти всегда имеет непустой ``pages``, поэтому фильтр
+    опирается строго на ``elements``, а не на ``pages``.
+    """
+
+    if len(chapters) >= 2 and chapters[0].title == "Front Matter" and not chapters[0].elements:
+        return chapters[1:]
+    return chapters
 
 
 # ---------------------------------------------------------------------------
@@ -336,9 +359,7 @@ def split_by_toc(pages: list[PageModel], toc: list[TocEntry]) -> list[Structured
     # Front-matter: страницы до первой записи TOC.
     front_pages = sorted(p for p in page_content if p < first_toc_page)
     if front_pages:
-        chapters.append(
-            _build_toc_chapter("Front Matter", None, None, 0, front_pages, page_content)
-        )
+        chapters.append(_build_toc_chapter("Front Matter", None, 0, front_pages, page_content))
 
     for i, entry in enumerate(toc):
         next_entry = toc[i + 1] if i + 1 < len(toc) else None
@@ -366,7 +387,6 @@ def split_by_toc(pages: list[PageModel], toc: list[TocEntry]) -> list[Structured
             _build_toc_chapter(
                 entry.title,
                 entry.author,
-                entry.print_page,
                 entry.level,
                 chapter_pages,
                 page_content,
@@ -379,12 +399,16 @@ def split_by_toc(pages: list[PageModel], toc: list[TocEntry]) -> list[Structured
 def _build_toc_chapter(
     title: str,
     author: str | None,
-    print_page: str | None,
     level: int,
     chapter_pages: list[int],
     page_content: dict[int, PageModel],
 ) -> StructuredChapter:
-    """Собрать главу TOC: перенести непустые блоки указанных страниц."""
+    """Собрать главу TOC: перенести непустые блоки указанных страниц.
+
+    ``print_page`` намеренно НЕ принимается: на уровне ``StructuredChapter`` его
+    хранить негде, а исходное значение остаётся в ``TocEntry`` документа. Раньше
+    параметр принимался и тут же выбрасывался (``_ = print_page``).
+    """
 
     elements: list[BookElement] = []
     pages: list[PageModel] = []
@@ -402,13 +426,9 @@ def _build_toc_chapter(
                         ref=block.ref,
                     )
                 )
-    chapter = StructuredChapter(
+    return StructuredChapter(
         title=title, author=author, level=level, pages=pages, elements=elements
     )
-    # ``print_page`` хранится в записях TOC; на уровне главы дублировать его в
-    # модели StructuredChapter негде, поэтому он остаётся в TocEntry документа.
-    _ = print_page
-    return chapter
 
 
 # ---------------------------------------------------------------------------

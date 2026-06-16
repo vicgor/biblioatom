@@ -50,6 +50,15 @@ class TestCleanPagehtml:
         assert 'class="page-no"' in clean_pagehtml('<p class="page">5</p>')
         assert "class='page-no'" in clean_pagehtml("<p class='page'>5</p>")
 
+    def test_renames_page_class_with_spaces_around_eq(self) -> None:
+        # Регресс: устойчивость к пробелам вокруг "=" (раньше строковая замена
+        # покрывала только class="page" / class='page' впритык).
+        assert 'class="page-no"' in clean_pagehtml('<p class = "page">5</p>')
+        assert "class='page-no'" in clean_pagehtml("<p class= 'page'>5</p>")
+
+    def test_renames_page_class_case_insensitive(self) -> None:
+        assert "page-no" in clean_pagehtml('<p CLASS="page">5</p>')
+
     def test_empty(self) -> None:
         assert clean_pagehtml(None) == ""
 

@@ -23,6 +23,9 @@ _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 _NON_WORD_RE = re.compile(r"[^\w\s]", re.U)
 _WS_RE = re.compile(r"\s+")
 _UNDERSCORES_RE = re.compile(r"_+")
+# class="page" → class="page-no": устойчиво к одинарным/двойным кавычкам и
+# пробелам вокруг "=". Кавычка captures-группой, чтобы вернуть её как была.
+_CLASS_PAGE_RE = re.compile(r"class\s*=\s*([\"'])page\1", re.I)
 
 
 def normalize_text(text: str | None) -> str:
@@ -48,8 +51,7 @@ def clean_pagehtml(pagehtml: str | None) -> str:
 
     s = pagehtml or ""
     s = _COMMENT_RE.sub("", s)
-    s = s.replace('class="page"', 'class="page-no"')
-    s = s.replace("class='page'", "class='page-no'")
+    s = _CLASS_PAGE_RE.sub(r"class=\1page-no\1", s)
     return s.strip()
 
 
