@@ -1,59 +1,174 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Этот файл — инструкция для Claude Code при работе с репозиторием.
 
-## Project context
+## Контекст проекта
 
-Python CLI для скачивания и конвертации книг с `elib.biblioatom.ru` через публичный RPC-эндпоинт `/rpc/bookviewer/cp/`. Является преемником `../biblioatom-extractor` (который был Tampermonkey-скриптом + отдельным конвертером).
+Python CLI для скачивания и конвертации книг с `elib.biblioatom.ru` через публичный RPC-эндпоинт `/rpc/bookviewer/cp/`. Преемник `../biblioatom-extractor` (Tampermonkey-скрипт + отдельный конвертер).
 
-## Commands
+**Версия:** 0.2.0 · **Python:** 3.12+ · **Менеджер:** uv
+
+## Команды разработки
 
 ```bash
-# Run the CLI
-biblioatom kapitsa_1994 -f epub,json -o output/
-biblioatom kapitsa_1994 --images -o output/        # with embedded illustrations
-biblioatom kapitsa_1994 --from-page 0 --to-page 100 --delay 500
-biblioatom --from-json export.json -f epub,fb2,html,txt
-biblioatom --from-json export.json --images -f epub -o output/
+# Зависимости
+uv sync
 
-# Install (editable)
-pip install -e .
+# Запуск CLI
+uv run biblioatom --help
+uv run biblioatom fetch kapitsa_1994 -o book.json
+uv run biblioatom pipeline kapitsa_1994 --images --azw3 -o book.epub
 
-# Run tests
-python -m pytest
-python -m pytest tests/test_convert.py  # single file
-python -m pytest -k TestBuildBook       # single class
+# Качество кода
+uv run ruff check
+uv run ruff format --check
+uv run mypy --strict src/
+
+# Тесты
+uv run pytest
+uv run pytest tests/test_structure_analyzer.py   # один файл
+uv run pytest -k "test_single_photo"             # по имени теста
+uv run pytest --tb=short                         # краткий traceback
 ```
 
-## Architecture
+## Архитектура
+
+Thin CLI / Fat Core, SoC, SRP, Dependency Inversion через `typing.Protocol`.
 
 ```
-biblioatom/
-├── fetch.py     — HTTP layer: fetch_book_meta, fetch_toc, fetch_page, fetch_image, download_book
-├── convert.py   — Format converters: build_txt/html/fb2/epub + chapter detection
-└── cli.py       — argparse entry point; download → build_book() pipeline
+src/biblioatom/
+├── cli.py             — Typer: парсинг аргументов → core → ExitCode (бизнес-логики нет)
+├── ui.py              — Rich console (stdout) и err_console (stderr)
+├── config.py          — pydantic-settings: 9 групп, префикс BIBLIOATOM_, разделитель __
+├── errors.py          — BookgrabError → ConfigurationError/FetchError/… + ExitCode enum
+├── logging_config.py  — structlog: correlation_id, redact секретов, JSON/pretty авто
+├── models.py          — Pydantic v2: ElementKind, BookElement, PageModel, StructuredDocument, …
+├── core/              — use cases (оркестрация, без I/O-деталей)
+│   ├── fetch_book.py         — загрузка: meta + TOC + страницы (best-effort по ошибкам страниц)
+│   ├── analyze_structure.py  — передача pages/toc в анализатор, простановка title/book_id
+│   ├── extract_scan_images.py — select_photo_pages + оркестрация ScanExtractor/ImageProcessor
+│   ├── build_epub.py         — передача StructuredDocument в epub_builder
+│   ├── convert_to_azw3.py    — вызов converter с логированием
+│   └── run_pipeline.py       — сквозной: fetch→analyze→[scans]→epub→[azw3], PipelineResult
+└── services/
+    ├── __init__.py          — только Protocol-интерфейсы (DI-контракты)
+    ├── fetcher.py           — httpx.Client + tenacity (retry только transient: 408/429/5xx)
+    ├── parser.py            — selectolax: parse_book_meta, parse_toc, parse_embedded_content
+    ├── structure_analyzer.py — split_by_toc / split_into_chapters + StructureAnalyzer
+    ├── html_cleaner.py      — normalize_text, clean_pagehtml, strip_tags_preserve_text
+    ├── scan_extractor.py    — OpenCV: grayscale→GaussianBlur→Otsu/Canny→morphology→findContours→crop
+    ├── image_processor.py   — Pillow: ресайз до max_width/max_height, конвертация режима, сохранение
+    ├── epub_builder.py      — EbookLib: EPUB 3, nav, spine, figcaption, двусторонние якоря сносок
+    └── converter.py         — subprocess.run(cmd_list) ebook-convert (shell=False)
+```
+
+## Поток данных
+
+```
+CLI (cli.py)
+  └─ fetch_book(fetcher, parser, book_id)  →  FetchedBook
+       └─ analyze_structure(analyzer, pages, toc)  →  StructuredDocument
+            ├─ [extract_scan_images(scan_extractor, image_processor, scans, dir)]  →  ScanExtractionResult
+            ├─ build_epub(epub_builder, document, out_path, images)  →  BuildResult
+            └─ [convert_to_azw3(converter, epub, azw3)]  →  BuildResult
+```
+
+## Protocol-интерфейсы
+
+Все `*Protocol` объявлены в `services/__init__.py`. Реализации внедряются в use cases через аргументы — use cases не создают зависимости сами.
+
+| Protocol | Реализация | Где внедряется |
+|----------|-----------|----------------|
+| `FetcherProtocol` | `Fetcher` | `fetch_book`, `run_pipeline` |
+| `ParserProtocol` | `Parser` | `fetch_book`, `run_pipeline` |
+| `StructureAnalyzerProtocol` | `StructureAnalyzer` | `analyze_structure`, `run_pipeline` |
+| `EpubBuilderProtocol` | `EpubBuilder` | `build_epub`, `run_pipeline` |
+| `ConverterProtocol` | `EbookConvertConverter` | `convert_to_azw3`, `run_pipeline` |
+| `ScanExtractorProtocol` | `ScanExtractor` | `extract_scan_images`, `run_pipeline` |
+| `ImageProcessorProtocol` | `ImageProcessor` | `extract_scan_images`, `run_pipeline` |
+
+## Обработка ошибок
+
+- Все доменные ошибки — подклассы `BookgrabError` из `errors.py`.
+- Каждый класс несёт `exit_code: ExitCode` (0/2/3/4/5/6/7/8/10).
+- CLI ловит `BookgrabError` в `_handle_errors()` → печатает сообщение в stderr → `raise typer.Exit(code)`.
+- `KeyboardInterrupt` → код 130.
+- Traceback только при `-vv` (verbose ≥ 2).
+- Retry (tenacity) — только для transient-ошибок: `TimeoutException`, `TransportError`, статусы 408/429/500/502/503/504. 404 и другие 4xx — немедленная доменная ошибка без ретрая.
+- Внешние исключения оборачиваются через `raise DomainError(...) from exc`.
+- `assert` в production-коде не используется — только `if ... raise`.
+
+## Модели (`models.py`)
+
+| Модель | Назначение |
+|--------|-----------|
+| `ElementKind` | StrEnum: CAPTION / FOOTNOTE / NOTE / EPIGRAPH / QUOTE / SIDEBAR / HEADING / LIST_ / TABLE |
+| `BookElement` | Типизированный блок (kind, text, page, anchor, ref) |
+| `TocEntry` | Запись оглавления (title, author, page, print_page, level) |
+| `PageModel` | Страница с EmbeddedContent и list[BookElement] |
+| `StructuredChapter` | Глава с pages и elements |
+| `StructuredDocument` | Книга: title, book_id, toc, chapters |
+| `ExtractedImage` | Кроп со скана (bytes + BoundingBox) |
+| `ImageAsset` | Сохранённый файл иллюстрации (path, page, caption) |
+| `BuildResult` | Результат сборки (book_id, outputs, images) |
+
+## Конфигурация (`config.py`)
+
+Все настройки — `Settings(BaseSettings)`, prefix `BIBLIOATOM_`, nested delimiter `__`.
+
+Группы: `app` · `http` · `parsing` · `structure` · `scan_extraction` · `image` · `epub` · `conversion` · `logging`
+
+```bash
+# Примеры
+BIBLIOATOM_HTTP__TIMEOUT=60
+BIBLIOATOM_HTTP__MAX_RETRIES=5
+BIBLIOATOM_LOGGING__LEVEL=DEBUG
+BIBLIOATOM_CONVERSION__EBOOK_CONVERT_BIN=/opt/calibre/ebook-convert
+BIBLIOATOM_SCAN_EXTRACTION__MIN_AREA_RATIO=0.03
+BIBLIOATOM_IMAGE__MAX_WIDTH=1200
+```
+
+## Тесты
+
+```
 tests/
-├── test_fetch.py    — urllib.request mocked via unittest.mock.patch
-└── test_convert.py  — pure unit tests, no I/O mocking needed
+├── conftest.py                  — общие фикстуры
+├── test_analyze_structure.py    — интеграционный: полный анализ книги
+├── test_build_epub.py           — core use case build_epub
+├── test_cli.py                  — CLI команды через CliRunner
+├── test_config.py               — валидация Settings и env-переменных
+├── test_convert_to_azw3.py      — core use case convert_to_azw3
+├── test_converter.py            — EbookConvertConverter (мок subprocess)
+├── test_epub_builder.py         — EpubBuilder (проверка ZIP/OPF/nav)
+├── test_errors.py               — иерархия ошибок, exit_code_for, подтипы
+├── test_extract_scan_images.py  — core use case extract_scan_images
+├── test_fetch_book.py           — core use case fetch_book (мок fetcher)
+├── test_fetcher.py              — Fetcher (respx HTTP-мок)
+├── test_html_cleaner.py         — normalize_text, clean_pagehtml
+├── test_image_processor.py      — ImageProcessor (Pillow)
+├── test_logging_config.py       — setup_logging, correlation_id, redact
+├── test_models.py               — Pydantic-модели и валидация
+├── test_parser.py               — Parser (selectolax): TOC, meta, content
+├── test_pipeline_integration.py — E2E без сети: FakeFetcher + реальные сервисы
+├── test_scan_extractor.py       — ScanExtractor: синтетические сканы numpy/OpenCV
+└── test_structure_analyzer.py   — split_by_toc, split_into_chapters, эвристики
 ```
 
-**Data flow:**
-1. `fetch.fetch_book_meta(book_id)` → `(title, max_page)` — parses HTML page
-2. `fetch.fetch_toc(book_id)` → `list[{title, author, page, print_page, level}]` — parses `<aside data-type="tree-box-contents">` on `/text/{book_id}/p0/`
-3. `fetch.download_book(...)` → `items: list[dict]` — each item: `{page, content: {valid, pagetext, pagehtml}}`
-4. CLI assembles `src` dict (title, book_id, source, page_range, generated_at, toc, items)
-5. If `--images`: `fetch.fetch_image(book_id, page_no)` for each page with an image-caption block → saved as `outdir/images/{page:04d}_{slug}.jpg`
-6. `convert.build_book(src, formats, outdir, images_dir=...)` → writes output files
+Scan-тесты генерируют синтетические страницы через numpy — бинарные фикстуры не нужны.
+Integration-тест использует `_FakeFetcher` (реализует `FetcherProtocol`) + реальные сервисы.
 
-**JSON compatibility:** The `src` dict format is compatible with `../biblioatom-extractor/convert_book.py` — `content` can be a dict or a JSON string; `parse_embedded_content()` handles both.
+## Конвенции
 
-**Image embedding:** `build_epub(src, chapters, out_path, images_dir=None)` — when `images_dir` is set, image-caption blocks (`<p class="img">`) become `<figure><img src="../images/…"/><figcaption>…</figcaption></figure>` with the JPEG added to the ZIP and OPF manifest. Images are matched by glob `{page:04d}_*.jpg`.
+- Все публичные функции типизированы; `mypy --strict src/` должен проходить без ошибок.
+- `from __future__ import annotations` во всех модулях.
+- Функции короткие; god objects отсутствуют.
+- Структурированное логирование: `_logger.info("module.event", key=value)`.
+- CLI-вывод — через `console`/`err_console` из `ui.py`, не через `print`.
+- Команды CLI делегируют все вычисления в core; в `cli.py` — только сборка зависимостей и форматирование вывода.
+- Секреты в логах маскируются процессором `redact_secrets` в `logging_config.py`.
 
-**Chapter splitting:** `split_chapters_by_toc(pages, toc)` — primary. Falls back to heuristic `split_into_chapters` if TOC is absent. When two consecutive TOC entries share the same page (section header + first child), the header becomes a divider chapter with no pages.
+## Известные технические долги
 
-## Conventions
-
-- stdlib only — no third-party runtime deps.
-- CLI output is Russian (`print` to stdout, progress on same line with `\r`).
-- `build-backend = "setuptools.build_meta"` — не `setuptools.backends.legacy:build` (нет в setuptools 82).
-- Image captions come from `<p class="img">` blocks; `<div class="comp-draft">` is a container and must not be matched by the block extractor (only `<p>` tags are matched).
+- `fetch.py` и `convert.py` — legacy stdlib-реализации (925 строк), исключены из ruff/mypy через `extend-exclude`. Подлежат удалению или переносу из `src/` после полной миграции.
+- `ElementKind.LIST = "list_"` — сериализованное значение отличается от имени члена; при необходимости совместимости с внешними форматами учитывать при десериализации.
+- `get_logger()` возвращает `Any` — временный компромисс для совместимости с API structlog.
