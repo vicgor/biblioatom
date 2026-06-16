@@ -96,7 +96,6 @@ def _collect_scans(scans_dir: Path) -> list[tuple[int, Path]]:
     return result
 
 
-
 def _load_book_from_json(
     path: Path,
 ) -> tuple[list[PageModel], list[TocEntry], str, str, str | None]:
@@ -278,9 +277,7 @@ def analyze(
     ctx: typer.Context,
     source: Annotated[
         str,
-        typer.Argument(
-            help="Идентификатор книги, URL или путь к локальному JSON (вывод fetch)."
-        ),
+        typer.Argument(help="Идентификатор книги, URL или путь к локальному JSON (вывод fetch)."),
     ],
     chapter_mode: Annotated[
         ChapterMode,
