@@ -55,6 +55,21 @@ class TocEntry(_Base):
     level: int = Field(default=0, ge=0)
 
 
+class BookMeta(_Base):
+    """Метаданные книги со страницы просмотра.
+
+    ``page_count_is_fallback`` отмечает, что ``max_page`` не удалось извлечь из
+    HTML (нет ``data-rel`` или иного источника) и использовано значение по
+    умолчанию из config. Признак нужен вышестоящему коду (``fetch_book``), чтобы
+    не принять «выдуманный» предел за настоящий и предупредить о возможной
+    неполноте загрузки.
+    """
+
+    title: str
+    max_page: int = Field(ge=1)
+    page_count_is_fallback: bool = False
+
+
 class EmbeddedContent(_Base):
     """Содержимое страницы из RPC-ответа (``content``)."""
 
@@ -112,6 +127,7 @@ class BuildResult(_Base):
 
 __all__ = [
     "BookElement",
+    "BookMeta",
     "BuildResult",
     "ElementKind",
     "EmbeddedContent",
