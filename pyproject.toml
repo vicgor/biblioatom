@@ -41,6 +41,9 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "respx>=0.21",
+    # lxml используется в тестах EPUB для парсинга XHTML/OPF и проверки
+    # well-formed-структуры (приходит транзитивно с ebooklib, но фиксируем явно).
+    "lxml>=5.2",
 ]
 
 [tool.hatch.build.targets.wheel]

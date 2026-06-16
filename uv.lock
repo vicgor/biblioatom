@@ -97,6 +97,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "lxml" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -122,6 +123,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "lxml", specifier = ">=5.2" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-cov", specifier = ">=5.0" },
