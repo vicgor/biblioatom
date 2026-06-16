@@ -21,7 +21,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import TypeVar
 from urllib.parse import quote
@@ -42,7 +41,7 @@ from biblioatom.errors import (
     ResourceNotFoundError,
 )
 from biblioatom.logging_config import get_logger
-from biblioatom.models import EmbeddedContent, TocEntry
+from biblioatom.models import BookMeta, EmbeddedContent, TocEntry
 from biblioatom.services.parser import Parser
 
 _logger = get_logger(__name__)
@@ -195,8 +194,8 @@ class Fetcher:
 
     # -- публичный API (FetcherProtocol) -----------------------------------
 
-    def fetch_book_meta(self, book_id: str) -> tuple[str, int]:
-        """Вернуть ``(title, max_page)`` для книги."""
+    def fetch_book_meta(self, book_id: str) -> BookMeta:
+        """Вернуть метаданные книги (:class:`BookMeta`)."""
 
         url = f"/text/{quote(book_id, safe='')}/"
         response = self._get(url)
@@ -212,22 +211,17 @@ class Fetcher:
     def fetch_page(self, book_id: str, page: int) -> EmbeddedContent:
         """Вернуть содержимое одной страницы через RPC-эндпоинт.
 
-        RPC отдаёт JSON; при невалидном JSON возвращается ``EmbeddedContent`` с
-        ``valid=False`` и сырым текстом в ``pagetext`` (как в legacy), а не
-        исключение — это штатное содержимое, а не сбой запроса.
+        RPC отдаёт JSON. Декодирование и разбор делегируются парсеру
+        (``parse_embedded_content``), который принимает сырую JSON-строку и сам
+        обрабатывает невалидный JSON (возвращает ``valid=False`` с сырым текстом
+        в ``pagetext``, как в legacy) — это штатное содержимое, а не сбой
+        запроса. Дублирующее декодирование ``json.loads`` в fetcher убрано.
         """
 
         rpc = self._app.rpc_path
         url = f"{rpc}?url={quote(book_id, safe='')}&page={quote(str(page), safe='')}"
         response = self._get(url)
-        raw = response.text
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return EmbeddedContent(valid=False, pagetext=raw, pagehtml="")
-        if isinstance(parsed, dict):
-            return self._parser.parse_embedded_content(parsed)
-        return EmbeddedContent(valid=False, pagetext=raw, pagehtml="")
+        return self._parser.parse_embedded_content(response.text)
 
     def fetch_image(self, book_id: str, page: int) -> bytes:
         """Вернуть байты JPEG-скана страницы."""

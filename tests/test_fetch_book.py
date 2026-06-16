@@ -8,11 +8,12 @@ happy path.
 from __future__ import annotations
 
 import pytest
+from structlog.testing import capture_logs
 
 from biblioatom.config import ParsingSettings
 from biblioatom.core.fetch_book import fetch_book
-from biblioatom.errors import FetchError, InputValidationError
-from biblioatom.models import EmbeddedContent, TocEntry
+from biblioatom.errors import FetchError, InputValidationError, ParseError
+from biblioatom.models import BookMeta, EmbeddedContent, TocEntry
 from biblioatom.services.parser import Parser
 
 
@@ -24,17 +25,25 @@ class _FakeFetcher:
         *,
         title: str = "Книга",
         max_page: int = 10,
+        page_count_is_fallback: bool = False,
         toc: list[TocEntry] | None = None,
         fail_pages: set[int] | None = None,
+        fail_exc: Exception | None = None,
     ) -> None:
         self._title = title
         self._max_page = max_page
+        self._page_count_is_fallback = page_count_is_fallback
         self._toc = toc or []
         self._fail_pages = fail_pages or set()
+        self._fail_exc = fail_exc or FetchError("boom")
         self.requested_pages: list[int] = []
 
-    def fetch_book_meta(self, book_id: str) -> tuple[str, int]:
-        return self._title, self._max_page
+    def fetch_book_meta(self, book_id: str) -> BookMeta:
+        return BookMeta(
+            title=self._title,
+            max_page=self._max_page,
+            page_count_is_fallback=self._page_count_is_fallback,
+        )
 
     def fetch_toc(self, book_id: str) -> list[TocEntry]:
         return self._toc
@@ -42,7 +51,7 @@ class _FakeFetcher:
     def fetch_page(self, book_id: str, page: int) -> EmbeddedContent:
         self.requested_pages.append(page)
         if page in self._fail_pages:
-            raise FetchError("boom", context={"page": page})
+            raise self._fail_exc
         return EmbeddedContent(valid=True, pagetext=f"стр {page}", pagehtml="")
 
     def fetch_image(self, book_id: str, page: int) -> bytes:
@@ -98,3 +107,36 @@ class TestHappyPath:
         # Сбой одной страницы не обрывает загрузку остальных.
         assert result.failed_pages == [1]
         assert [p.page for p in result.pages] == [0, 1, 2]
+
+
+class TestFallbackPageCount:
+    """M3: fallback-предел не должен проходить тихо."""
+
+    def test_fallback_logs_warning(self) -> None:
+        fetcher = _FakeFetcher(max_page=545, page_count_is_fallback=True)
+        with capture_logs() as events:
+            fetch_book(fetcher, _parser(), "book", from_page=0, to_page=1)
+        assert any(e["event"] == "fetch_book.page_count_is_fallback" for e in events)
+
+    def test_real_page_count_no_fallback_warning(self) -> None:
+        fetcher = _FakeFetcher(max_page=5, page_count_is_fallback=False)
+        with capture_logs() as events:
+            fetch_book(fetcher, _parser(), "book", from_page=0, to_page=1)
+        assert not any(e["event"] == "fetch_book.page_count_is_fallback" for e in events)
+
+
+class TestPageErrorHandling:
+    """M2: best-effort только по доменным ошибкам; баги всплывают."""
+
+    def test_domain_parse_error_is_best_effort(self) -> None:
+        fetcher = _FakeFetcher(max_page=3, fail_pages={1}, fail_exc=ParseError("bad"))
+        result = fetch_book(fetcher, _parser(), "book", from_page=0, to_page=2)
+        assert result.failed_pages == [1]
+        assert [p.page for p in result.pages] == [0, 1, 2]
+
+    def test_programming_error_propagates(self) -> None:
+        # AttributeError — программный баг, не сетевой сбой: он НЕ должен
+        # проглатываться best-effort catch, а всплывать наружу.
+        fetcher = _FakeFetcher(max_page=3, fail_pages={1}, fail_exc=AttributeError("bug"))
+        with pytest.raises(AttributeError):
+            fetch_book(fetcher, _parser(), "book", from_page=0, to_page=2)

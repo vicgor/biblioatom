@@ -156,9 +156,10 @@ class TestFetchMetaTocImage:
             return httpx.Response(200, text=html)
 
         with _make_fetcher(handler) as fetcher:
-            title, max_page = fetcher.fetch_book_meta("book")
-        assert title == "Книга"
-        assert max_page == 50
+            meta = fetcher.fetch_book_meta("book")
+        assert meta.title == "Книга"
+        assert meta.max_page == 50
+        assert meta.page_count_is_fallback is False
 
     def test_fetch_toc(self) -> None:
         html = (

@@ -24,8 +24,11 @@ from selectolax.parser import HTMLParser, Node
 
 from biblioatom.config import ParsingSettings
 from biblioatom.errors import ParseError
-from biblioatom.models import EmbeddedContent, PageModel, TocEntry
+from biblioatom.logging_config import get_logger
+from biblioatom.models import BookMeta, EmbeddedContent, PageModel, TocEntry
 from biblioatom.services import structure_analyzer
+
+_logger = get_logger(__name__)
 
 # Заголовок страницы книги имеет вид "<Название> / Просмотр…"; хвост отрезаем.
 _TITLE_SUFFIX_RE = re.compile(r"\s*/\s*Просмотр.*$", re.I)
@@ -61,13 +64,15 @@ class Parser:
 
     # -- метаданные книги ---------------------------------------------------
 
-    def parse_book_meta(self, html: str, book_id: str) -> tuple[str, int]:
-        """Извлечь ``(title, max_page)`` со страницы книги.
+    def parse_book_meta(self, html: str, book_id: str) -> BookMeta:
+        """Извлечь метаданные книги (:class:`BookMeta`) со страницы.
 
         ``title`` берётся из ``<title>`` (с отрезанным служебным хвостом),
         ``max_page`` — максимум среди атрибутов ``data-rel``. При отсутствии
         данных используются безопасные значения: ``book_id`` и
-        ``fallback_max_page`` из config.
+        ``fallback_max_page`` из config; в этом случае
+        ``page_count_is_fallback=True`` и пишется WARNING — чтобы «выдуманный»
+        предел не был тихим (вышестоящий код может предупредить о неполноте).
         """
 
         try:
@@ -96,8 +101,16 @@ class Parser:
             if val > max_data_rel:
                 max_data_rel = val
 
-        max_page = max_data_rel if max_data_rel > 0 else self._settings.fallback_max_page
-        return title, max_page
+        if max_data_rel > 0:
+            return BookMeta(title=title, max_page=max_data_rel, page_count_is_fallback=False)
+
+        fallback = self._settings.fallback_max_page
+        _logger.warning(
+            "page_count_fallback_used",
+            book_id=book_id,
+            fallback_max_page=fallback,
+        )
+        return BookMeta(title=title, max_page=fallback, page_count_is_fallback=True)
 
     # -- оглавление ---------------------------------------------------------
 

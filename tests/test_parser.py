@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from structlog.testing import capture_logs
+
 from biblioatom.config import ParsingSettings
 from biblioatom.models import EmbeddedContent
 from biblioatom.services.parser import Parser
@@ -51,21 +53,22 @@ def _parser() -> Parser:
 
 class TestParseBookMeta:
     def test_extracts_title_and_max_page(self) -> None:
-        title, max_page = _parser().parse_book_meta(_META_HTML, "kapitsa_1994")
-        assert title == "Капица"
-        assert max_page == 99
+        meta = _parser().parse_book_meta(_META_HTML, "kapitsa_1994")
+        assert meta.title == "Капица"
+        assert meta.max_page == 99
+        assert meta.page_count_is_fallback is False
 
     def test_title_fallback_to_book_id(self) -> None:
         html = "<html><head></head><body></body></html>"
-        title, max_page = _parser().parse_book_meta(html, "some_book")
-        assert title == "some_book"
+        meta = _parser().parse_book_meta(html, "some_book")
+        assert meta.title == "some_book"
 
     def test_max_page_fallback_from_config(self) -> None:
         settings = ParsingSettings(fallback_max_page=777)
         html = "<html><head><title>Без навигации</title></head><body></body></html>"
-        title, max_page = Parser(settings).parse_book_meta(html, "norel")
-        assert title == "Без навигации"
-        assert max_page == 777
+        meta = Parser(settings).parse_book_meta(html, "norel")
+        assert meta.title == "Без навигации"
+        assert meta.max_page == 777
 
     def test_non_numeric_data_rel_ignored(self) -> None:
         html = (
@@ -73,8 +76,20 @@ class TestParseBookMeta:
             '<div data-rel="abc"></div><div data-rel="12"></div>'
             "</body></html>"
         )
-        _title, max_page = _parser().parse_book_meta(html, "b")
-        assert max_page == 12
+        meta = _parser().parse_book_meta(html, "b")
+        assert meta.max_page == 12
+        assert meta.page_count_is_fallback is False
+
+    def test_fallback_marked_and_logged(self) -> None:
+        # M1/M3: при валидном HTML без data-rel число страниц помечается как
+        # fallback и пишется WARNING — оно не должно быть тихим.
+        settings = ParsingSettings(fallback_max_page=545)
+        html = "<html><head><title>Без навигации</title></head><body></body></html>"
+        with capture_logs() as events:
+            meta = Parser(settings).parse_book_meta(html, "norel")
+        assert meta.max_page == 545
+        assert meta.page_count_is_fallback is True
+        assert any(e["event"] == "page_count_fallback_used" for e in events)
 
 
 class TestParseToc:

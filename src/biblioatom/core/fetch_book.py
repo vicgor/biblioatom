@@ -19,7 +19,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-from biblioatom.errors import InputValidationError
+from biblioatom.errors import FetchError, InputValidationError, ParseError
 from biblioatom.logging_config import get_logger
 from biblioatom.models import EmbeddedContent, PageModel, TocEntry
 from biblioatom.services import FetcherProtocol, ParserProtocol
@@ -89,11 +89,24 @@ def fetch_book(
     :raises InputValidationError: при некорректном диапазоне страниц.
     """
 
-    title, max_page = fetcher.fetch_book_meta(book_id)
+    meta = fetcher.fetch_book_meta(book_id)
+    title, max_page = meta.title, meta.max_page
     if to_page is None:
         to_page = max_page
 
     _validate_page_range(from_page, to_page, max_page)
+
+    # M3: число страниц получено через fallback (HTML не содержал data-rel).
+    # Предел «выдуман» и неотличим от настоящего на уровне валидации, поэтому
+    # явно предупреждаем — книга может скачаться частично/пусто. Поведение
+    # остаётся best-effort (не hard-error), но больше не тихим.
+    if meta.page_count_is_fallback:
+        _logger.warning(
+            "fetch_book.page_count_is_fallback",
+            book_id=book_id,
+            max_page=max_page,
+            to_page=to_page,
+        )
 
     toc = fetcher.fetch_toc(book_id)
     # Печатные номера страниц из TOC, привязанные к физическому индексу.
@@ -115,7 +128,11 @@ def fetch_book(
     for index, page_no in enumerate(range(from_page, to_page + 1)):
         try:
             content = fetcher.fetch_page(book_id, page_no)
-        except Exception as exc:  # noqa: BLE001 — best-effort: один сбой не рвёт книгу
+        except (FetchError, ParseError) as exc:
+            # M2: best-effort только по доменным ошибкам — сетевой сбой или
+            # неразбираемый ответ страницы не рвёт всю книгу. Программные
+            # исключения (AttributeError/KeyError/TypeError) сюда НЕ попадают и
+            # всплывают наружу, чтобы баги не маскировались под сбой страницы.
             failed.append(page_no)
             _logger.warning(
                 "fetch_book.page_failed",
