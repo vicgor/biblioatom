@@ -148,6 +148,9 @@ def fetch_book(
         print_page = print_pages.get(page_no)
         if print_page is not None:
             model.print_page = print_page
+        # Страница 0 — всегда обложка (нет печатного номера, CDN = 0000.jpg).
+        if page_no == 0:
+            model.is_cover = True
         pages.append(model)
 
         _logger.debug(

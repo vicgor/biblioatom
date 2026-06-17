@@ -21,7 +21,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 from urllib.parse import quote
 
@@ -151,6 +154,28 @@ class Fetcher:
         )
         return retrying(fn)
 
+    # -- отладочный дамп HTML -----------------------------------------------
+
+    def _dump_html_if_debug(self, url: str, html: str) -> None:
+        """Сохранить HTML-ответ в /tmp только при уровне DEBUG.
+
+        Файл создаётся один раз за URL (имя = MD5-хэш URL), поэтому повторные
+        запросы одной страницы перезаписывают предыдущий дамп, не засоряя /tmp.
+        Вызов безопасен при любом уровне логирования — тело метода не выполняется
+        если DEBUG не активен.
+        """
+        if not logging.getLogger(__name__).isEnabledFor(logging.DEBUG):
+            return
+        slug = hashlib.md5(url.encode()).hexdigest()[:12]
+        path = Path("/tmp") / f"biblioatom_{slug}.html"
+        path.write_text(html, encoding="utf-8")
+        _logger.debug(
+            "fetch.html_dumped",
+            url=url,
+            path=str(path),
+            size_bytes=len(html.encode()),
+        )
+
     # -- низкоуровневый GET --------------------------------------------------
 
     def _get(self, url: str) -> httpx.Response:
@@ -190,6 +215,7 @@ class Fetcher:
                 "HTTP request returned an error status.",
                 context={"url": url, "status_code": response.status_code},
             )
+        self._dump_html_if_debug(url, response.text)
         return response
 
     # -- публичный API (FetcherProtocol) -----------------------------------

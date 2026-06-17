@@ -81,10 +81,15 @@ class EmbeddedContent(_Base):
 
 
 class PageModel(_Base):
-    """Модель одной страницы книги."""
+    """Модель одной страницы книги.
+
+    ``is_cover`` — True для обложки (RPC-индекс 0). Скан обложки хранится
+    под именем ``0000.jpg`` и не имеет печатного номера.
+    """
 
     page: int = Field(ge=0)
     print_page: str | None = None
+    is_cover: bool = False
     content: EmbeddedContent
     elements: list[BookElement] = Field(default_factory=list)
 

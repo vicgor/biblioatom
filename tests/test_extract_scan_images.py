@@ -63,13 +63,20 @@ class _FakeProcessor:
         return ImageAsset(page=image.page, path=out_path.with_suffix(".jpg"))
 
 
-def _page(num: int, *, caption: str | None = None, print_page: str | None = None) -> PageModel:
+def _page(
+    num: int,
+    *,
+    caption: str | None = None,
+    print_page: str | None = None,
+    is_cover: bool = False,
+) -> PageModel:
     elements: list[BookElement] = []
     if caption is not None:
         elements.append(BookElement(kind=ElementKind.CAPTION, text=caption, page=num))
     return PageModel(
         page=num,
         print_page=print_page,
+        is_cover=is_cover,
         content=EmbeddedContent(),
         elements=elements,
     )
@@ -89,16 +96,34 @@ def test_select_photo_pages_picks_caption_pages() -> None:
     assert result == [PhotoPage(page=5, cdn_page=4, caption="Рис. 1")]
 
 
-def test_select_photo_pages_cdn_falls_back_to_page_minus_one() -> None:
-    """Без печатного номера CDN-страница = page - 1 (legacy-поведение)."""
+def test_select_photo_pages_cdn_falls_back_to_rpc_index() -> None:
+    """Без print_page CDN-номер == RPC-индекс (0-based), не page-1."""
 
     result = select_photo_pages([_page(10, caption="Фото")])
-    assert result == [PhotoPage(page=10, cdn_page=9, caption="Фото")]
+    assert result == [PhotoPage(page=10, cdn_page=10, caption="Фото")]
 
 
 def test_select_photo_pages_ignores_non_numeric_print_page() -> None:
+    """Non-numeric print_page → fallback: cdn_page == page (RPC-индекс)."""
+
     result = select_photo_pages([_page(10, caption="Фото", print_page="XII")])
-    assert result[0].cdn_page == 9
+    assert result[0].cdn_page == 10
+
+
+def test_select_photo_pages_skips_cover() -> None:
+    """Обложка (is_cover=True) не попадает в список фото-страниц даже с CAPTION."""
+
+    cover = _page(0, caption="Обложка", is_cover=True)
+    assert select_photo_pages([cover]) == []
+
+
+def test_select_photo_pages_cover_cdn_page_is_zero() -> None:
+    """Обложка (page=0, print_page=None) → _cdn_page_for вернёт 0, не -1."""
+
+    from biblioatom.core.extract_scan_images import _cdn_page_for
+
+    cover = _page(0, is_cover=True)
+    assert _cdn_page_for(cover) == 0
 
 
 def test_select_photo_pages_empty_caption_ignored() -> None:

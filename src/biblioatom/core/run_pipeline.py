@@ -80,10 +80,29 @@ def _extract_images(
     """
 
     images_dir.mkdir(parents=True, exist_ok=True)
+
+    scans: list[tuple[int, Path]] = []
+
+    # Обложка (page=0) скачивается всегда явно: она исключена из select_photo_pages
+    # (нет CAPTION), но должна быть первым ассетом EPUB. CDN-файл: 0000.jpg.
+    cover_pages = [p for p in book.pages if p.is_cover]
+    for cover in cover_pages:
+        try:
+            data = fetcher.fetch_image(book.book_id, cover.page)  # cdn_page == 0
+            raw_path = images_dir / f"{cover.page:04d}_raw.bin"
+            raw_path.write_bytes(data)
+            scans.append((cover.page, raw_path))
+            _logger.info("run_pipeline.cover_fetched", cdn_page=cover.page)
+        except FetchError as exc:
+            _logger.warning(
+                "run_pipeline.cover_fetch_failed",
+                cdn_page=cover.page,
+                error=str(exc),
+            )
+
     photo_pages = select_photo_pages(book.pages)
     _logger.info("run_pipeline.scan_pages_selected", count=len(photo_pages))
 
-    scans: list[tuple[int, Path]] = []
     for photo in photo_pages:
         try:
             data = fetcher.fetch_image(book.book_id, photo.cdn_page)
