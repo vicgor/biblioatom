@@ -37,6 +37,7 @@ from biblioatom.services.fetcher import Fetcher
 from biblioatom.services.image_processor import ImageProcessor
 from biblioatom.services.parser import Parser
 from biblioatom.services.scan_extractor import ScanExtractor
+from biblioatom.services.source_utils import book_id_from_source
 from biblioatom.services.structure_analyzer import StructureAnalyzer
 from biblioatom.ui import console, err_console
 
@@ -96,27 +97,6 @@ def _collect_scans(scans_dir: Path) -> list[tuple[int, Path]]:
     return result
 
 
-def _book_id_from_source(source: str) -> str:
-    """Извлечь идентификатор книги из URL или вернуть строку как есть.
-
-    Поддерживаются формы ``kapitsa_1994`` и
-    ``https://elib.biblioatom.ru/text/kapitsa_1994/...``.
-    """
-
-    cleaned = source.strip().rstrip("/")
-    if "/text/" in cleaned:
-        tail = cleaned.split("/text/", 1)[1]
-        candidate = tail.split("/", 1)[0]
-        if candidate:
-            return candidate
-    if "/" in cleaned or not cleaned:
-        raise InputValidationError(
-            "Could not derive a book id from the given source.",
-            context={"source": source},
-        )
-    return cleaned
-
-
 def _load_book_from_json(
     path: Path,
 ) -> tuple[list[PageModel], list[TocEntry], str, str, str | None]:
@@ -148,7 +128,6 @@ def _handle_errors(*, verbose: bool) -> Iterator[None]:
     иначе печатается понятное сообщение в stderr, а процесс завершается кодом из
     :func:`exit_code_for`. ``KeyboardInterrupt`` → код 130.
     """
-
     try:
         yield
     except KeyboardInterrupt:
@@ -165,7 +144,6 @@ def _handle_errors(*, verbose: bool) -> Iterator[None]:
 
 def _load_settings(config_file: Path | None) -> Settings:
     """Загрузить настройки из ``.env`` (опционально) или из окружения."""
-
     if config_file is not None:
         return Settings(_env_file=str(config_file))  # type: ignore[call-arg]
     return get_settings()
@@ -177,7 +155,6 @@ def _build_fetcher(settings: Settings) -> tuple[Fetcher, Parser]:
     Возвращает пару ``(fetcher, parser)``, чтобы один экземпляр ``Parser``
     использовался и внутри ``Fetcher``, и при вызовах use case — без дублирования.
     """
-
     parser = Parser(settings.parsing)
     fetcher = Fetcher(app=settings.app, http=settings.http, parser=parser)
     return fetcher, parser
@@ -185,7 +162,6 @@ def _build_fetcher(settings: Settings) -> tuple[Fetcher, Parser]:
 
 def _version_callback(value: bool) -> None:
     """Вывести версию и выйти."""
-
     if value:
         console.print(f"biblioatom [bold]{__version__}[/bold]")
         raise typer.Exit()
@@ -223,7 +199,6 @@ def main(
     ] = None,
 ) -> None:
     """Глобальные опции, применяемые ко всем подкомандам."""
-
     if quiet:
         level = "WARNING"
     elif verbose >= 2:
@@ -258,13 +233,12 @@ def fetch(
     ] = None,
 ) -> None:
     """Скачать книгу и сохранить страницы с оглавлением в JSON."""
-
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
         from biblioatom.core.fetch_book import fetch_book
 
-        book_id = _book_id_from_source(source)
+        book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
         try:
             book = fetch_book(
@@ -298,9 +272,7 @@ def analyze(
     ctx: typer.Context,
     source: Annotated[
         str,
-        typer.Argument(
-            help="Идентификатор книги, URL или путь к локальному JSON (вывод fetch)."
-        ),
+        typer.Argument(help="Идентификатор книги, URL или путь к локальному JSON (вывод fetch)."),
     ],
     chapter_mode: Annotated[
         ChapterMode,
@@ -317,7 +289,6 @@ def analyze(
     - идентификатором книги (``kapitsa_1994``) или URL — книга скачивается;
     - путём к локальному ``.json``-файлу (вывод команды ``fetch``) — сеть не используется.
     """
-
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
@@ -332,7 +303,7 @@ def analyze(
             # Идентификатор или URL — скачиваем.
             from biblioatom.core.fetch_book import fetch_book
 
-            book_id = _book_id_from_source(source)
+            book_id = book_id_from_source(source)
             fetcher, parser = _build_fetcher(settings)
             try:
                 book = fetch_book(
@@ -380,7 +351,6 @@ def extract_scans(
     ] = Path("images"),
 ) -> None:
     """Извлечь иллюстрации из локальных сканов средствами OpenCV/Pillow."""
-
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
@@ -424,7 +394,6 @@ def build(
     ] = ChapterMode.STRICT,
 ) -> None:
     """Собрать EPUB3 из ранее скачанного JSON."""
-
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
@@ -458,7 +427,6 @@ def convert(
     ] = None,
 ) -> None:
     """Сконвертировать EPUB в AZW3 через Calibre (ebook-convert)."""
-
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
@@ -510,13 +478,12 @@ def pipeline(
     ] = False,
 ) -> None:
     """Полный пайплайн: загрузка → анализ → (сканы) → EPUB → (AZW3)."""
-
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
         from biblioatom.core.run_pipeline import run_pipeline
 
-        book_id = _book_id_from_source(source)
+        book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
         try:
             result = run_pipeline(
@@ -550,7 +517,6 @@ def pipeline(
 
 def main_entry() -> None:
     """Точка входа консольного скрипта ``biblioatom`` (см. ``pyproject.toml``)."""
-
     app()
 
 

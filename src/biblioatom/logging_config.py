@@ -11,10 +11,19 @@ from __future__ import annotations
 import logging
 import sys
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, cast
 
 import structlog
-from structlog.types import EventDict, Processor
+from structlog.types import EventDict, FilteringBoundLogger, Processor
+
+#: Публичный псевдоним типа логгера, возвращаемого :func:`get_logger`.
+#:
+#: ``structlog.get_logger()`` аннотирован как ``Any`` в самой библиотеке
+#: (``BoundLoggerLazyProxy`` делегирует методы динамически), поэтому мы
+#: используем ``FilteringBoundLogger`` — Protocol из ``structlog.types``,
+#: объявляющий весь публичный API (info/debug/warning/error/…).
+#: Это позволяет mypy проверять вызовы логгера во всём проекте.
+BoundLogger = FilteringBoundLogger
 
 #: Идентификатор корреляции для связывания записей в рамках одной операции.
 _correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
@@ -27,7 +36,6 @@ _REDACTED = "***REDACTED***"
 
 def set_correlation_id(value: str | None) -> None:
     """Установить correlation_id для текущего контекста выполнения."""
-
     _correlation_id.set(value)
 
 
@@ -35,7 +43,6 @@ def add_correlation_id(
     _logger: logging.Logger, _method_name: str, event_dict: EventDict
 ) -> EventDict:
     """Процессор: добавить correlation_id в запись, если он задан."""
-
     cid = _correlation_id.get()
     if cid is not None:
         event_dict["correlation_id"] = cid
@@ -44,7 +51,6 @@ def add_correlation_id(
 
 def _redact_value(value: Any) -> Any:
     """Рекурсивно замаскировать секреты во вложенных dict и списках dict."""
-
     if isinstance(value, dict):
         return {
             k: (_REDACTED if k.lower() in _SECRET_KEYS else _redact_value(v))
@@ -57,7 +63,6 @@ def _redact_value(value: Any) -> Any:
 
 def redact_secrets(_logger: logging.Logger, _method_name: str, event_dict: EventDict) -> EventDict:
     """Процессор: заменить значения секретных ключей на маску на любой глубине."""
-
     for key in list(event_dict.keys()):
         if key.lower() in _SECRET_KEYS:
             event_dict[key] = _REDACTED
@@ -75,7 +80,6 @@ def setup_logging(level: str = "INFO", *, json_logs: bool | None = None) -> None
         ``None`` — выбирается автоматически по ``sys.stderr.isatty()``: JSON для
         не-tty, цветной вывод для интерактивного терминала.
     """
-
     if json_logs is None:
         json_logs = not sys.stderr.isatty()
 
@@ -110,14 +114,14 @@ def setup_logging(level: str = "INFO", *, json_logs: bool | None = None) -> None
     )
 
 
-def get_logger(name: str | None = None) -> Any:
+def get_logger(name: str | None = None) -> FilteringBoundLogger:
     """Вернуть structlog-логгер (опционально именованный)."""
-
-    return structlog.get_logger(name)
+    return cast(FilteringBoundLogger, structlog.get_logger(name))
 
 
 __all__ = [
     "add_correlation_id",
+    "BoundLogger",
     "get_logger",
     "redact_secrets",
     "set_correlation_id",
