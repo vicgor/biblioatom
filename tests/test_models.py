@@ -30,8 +30,8 @@ def test_book_element() -> None:
 
 def test_element_kind_values() -> None:
     # Член переименован в LIST_ (underscore в имени), значение исправлено на "list".
-    assert ElementKind.LIST_ == "list"
-    assert ElementKind.HEADING == "heading"
+    assert ElementKind.LIST_.value == "list"
+    assert ElementKind.HEADING.value == "heading"
 
 
 def test_page_and_chapter_and_document() -> None:

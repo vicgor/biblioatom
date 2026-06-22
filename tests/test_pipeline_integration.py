@@ -20,6 +20,7 @@ from biblioatom.errors import InputValidationError
 from biblioatom.models import (
     BookMeta,
     EmbeddedContent,
+    ExtractedImage,
     ImageAsset,
     TocEntry,
 )
@@ -191,7 +192,7 @@ def test_pipeline_converts_to_azw3_with_fake_converter(tmp_path: Path) -> None:
 class _FakeScanExtractor:
     """Мок-извлекатель сканов, реализующий ``ScanExtractorProtocol``."""
 
-    def extract(self, image: bytes, page: int) -> list[object]:
+    def extract(self, image: bytes, page: int) -> list[ExtractedImage]:
         return []
 
 

@@ -74,15 +74,15 @@ def test_str_without_context() -> None:
 
 
 def test_exit_codes_are_stable() -> None:
-    assert ExitCode.OK == 0
-    assert ExitCode.CONFIGURATION == 2
-    assert ExitCode.INPUT_VALIDATION == 3
-    assert ExitCode.FETCH == 4
-    assert ExitCode.PARSE == 5
-    assert ExitCode.STRUCTURE_ANALYSIS == 6
-    assert ExitCode.IMAGE == 7
-    assert ExitCode.EPUB_BUILD == 8
-    assert ExitCode.EXTERNAL_TOOL == 10
+    assert ExitCode.OK.value == 0
+    assert ExitCode.CONFIGURATION.value == 2
+    assert ExitCode.INPUT_VALIDATION.value == 3
+    assert ExitCode.FETCH.value == 4
+    assert ExitCode.PARSE.value == 5
+    assert ExitCode.STRUCTURE_ANALYSIS.value == 6
+    assert ExitCode.IMAGE.value == 7
+    assert ExitCode.EPUB_BUILD.value == 8
+    assert ExitCode.EXTERNAL_TOOL.value == 10
 
 
 class TestRetryPolicy:
