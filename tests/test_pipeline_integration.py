@@ -223,5 +223,6 @@ def test_pipeline_extracts_scans_best_effort(tmp_path: Path) -> None:
     )
 
     _assert_valid_epub(result.epub_path)
-    # Извлекатель вернул 0 кропов — пайплайн остаётся валидным (best-effort).
-    assert result.images == []
+    # Обложка (page=0) всегда включается; кропов 0 — пайплайн остаётся валидным.
+    assert len(result.images) == 1
+    assert result.images[0].page == 0

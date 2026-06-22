@@ -83,15 +83,18 @@ def _extract_images(
 
     scans: list[tuple[int, Path]] = []
 
-    # Обложка (page=0) скачивается всегда явно: она исключена из select_photo_pages
-    # (нет CAPTION), но должна быть первым ассетом EPUB. CDN-файл: 0000.jpg.
+    from biblioatom.models import ImageAsset
+
+    cover_assets: list[ImageAsset] = []
+
     cover_pages = [p for p in book.pages if p.is_cover]
     for cover in cover_pages:
         try:
-            data = fetcher.fetch_image(book.book_id, cover.page)  # cdn_page == 0
-            raw_path = images_dir / f"{cover.page:04d}_raw.bin"
+            data = fetcher.fetch_image(book.book_id, cover.page)
+            raw_path = images_dir / f"{cover.page:04d}_cover.jpg"
             raw_path.write_bytes(data)
-            scans.append((cover.page, raw_path))
+            asset = ImageAsset(page=cover.page, path=raw_path)
+            cover_assets.append(asset)
             _logger.info("run_pipeline.cover_fetched", cdn_page=cover.page)
         except FetchError as exc:
             _logger.warning(
@@ -114,11 +117,13 @@ def _extract_images(
                 error=str(exc),
             )
             continue
-        raw_path = images_dir / f"{photo.page:04d}_raw.bin"
+        raw_path = images_dir / f"{photo.page:04d}_raw.jpg"
         raw_path.write_bytes(data)
         scans.append((photo.page, raw_path))
 
-    return extract_scan_images(scan_extractor, image_processor, scans, images_dir)
+    result = extract_scan_images(scan_extractor, image_processor, scans, images_dir)
+    result.images = cover_assets + result.images
+    return result
 
 
 def run_pipeline(

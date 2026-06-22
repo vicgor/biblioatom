@@ -53,15 +53,7 @@ packages = ["src/biblioatom"]
 target-version = "py312"
 line-length = 100
 src = ["src", "tests"]
-# Легаси stdlib-модули (fetch/convert) и их тесты остаются нетронутыми как
-# исторический эталон — исключаем их из линтинга и форматирования. cli.py и
-# __main__.py переписаны на Typer (Этап 6) и снова под линтером.
-extend-exclude = [
-    "src/biblioatom/fetch.py",
-    "src/biblioatom/convert.py",
-    "tests/test_convert.py",
-    "tests/test_fetch.py",
-]
+extend-exclude = []
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PT", "A"]
@@ -69,13 +61,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "PT", "A"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-# Легаси stdlib-модули (fetch/convert) — исторический эталон, исключены из
-# strict-проверки. cli.py и __main__.py переписаны на Typer (Этап 6) и проходят
-# strict.
-exclude = [
-    "src/biblioatom/fetch\\.py",
-    "src/biblioatom/convert\\.py",
-]
+exclude = []
 
 # PIL (Pillow) намеренно НЕ включён в ignore_missing_imports:
 # Pillow >= 10 поставляет py.typed и inline-стабы, поэтому mypy проверяет

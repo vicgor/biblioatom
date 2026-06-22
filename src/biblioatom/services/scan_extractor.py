@@ -118,6 +118,34 @@ class ScanExtractor:
         )
         return closed.astype(np.uint8)
 
+    def _binarize_dark_regions(self, scan: MatLike) -> MatLike:
+        """Найти тёмные области (фото/иллюстрации) на фоне светлого листа.
+
+        Используется как fallback когда стандартная бинаризация не находит
+        достаточно крупных контуров. Фото обычно темнее текста и фона.
+        """
+        gray = cv2.cvtColor(scan, cv2.COLOR_BGR2GRAY)
+        k = self._settings.blur_kernel
+        blurred = cv2.GaussianBlur(gray, (k, k), 0)
+
+        # Адаптивная пороговая фильтрация для выделения тёмных областей
+        # blockSize=51 — размер окна для вычисления порога
+        # C=10 — константа, вычитаемая из среднего
+        mask = cv2.adaptiveThreshold(
+            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 10
+        )
+
+        # Морфология: закрыть разрывы, убрать мелкий шум
+        m = self._settings.morph_kernel
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (m, m))
+        closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        # Убрать мелкие объекты (шум)
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_open, iterations=1)
+
+        return closed.astype(np.uint8)
+
     def _detect_boxes(self, scan: MatLike) -> list[BoundingBox]:
         """Найти и отфильтровать прямоугольные области-кандидаты."""
 
@@ -131,8 +159,113 @@ class ScanExtractor:
             if box is not None:
                 boxes.append(box)
 
+        # Fallback 1: детекция тёмных областей (фото на светлом фоне).
+        if not boxes:
+            mask_dark = self._binarize_dark_regions(scan)
+            contours_dark, _ = cv2.findContours(
+                mask_dark, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            for contour in contours_dark:
+                box = self._accept_contour(contour, page_area)
+                if box is not None:
+                    boxes.append(box)
+
+        # Fallback 2: поиск крупных тёмных областей без чётких рамок.
+        # Если fallback 1 нашёл только мелкие объекты, ищем по-другому.
+        if not boxes or all((b.width * b.height) / page_area < 0.05 for b in boxes):
+            large_boxes = self._detect_large_dark_regions(scan, page_area)
+            if large_boxes:
+                boxes = large_boxes
+
         # Стабильный порядок: сверху-вниз, затем слева-направо.
         boxes.sort(key=lambda b: (b.y, b.x))
+        return boxes
+
+    def _detect_large_dark_regions(self, scan: MatLike, page_area: float) -> list[BoundingBox]:
+        """Найти крупные тёмные области (фото) без чётких рамок.
+
+        Используется как последний fallback когда стандартные методы не нашли
+        иллюстраций. Фото имеет фон темнее белых полей страницы, но светлее текста.
+        """
+        gray = cv2.cvtColor(scan, cv2.COLOR_BGR2GRAY)
+        h, w = gray.shape
+
+        # Определяем уровень белого по полям страницы (крайние 50px)
+        margins = np.concatenate(
+            [
+                gray[:, :50].ravel(),
+                gray[:, -50:].ravel(),
+                gray[:50, :].ravel(),
+                gray[-50:, :].ravel(),
+            ]
+        )
+        white_level = float(np.percentile(margins, 95))
+
+        # Фото: яркость ниже белого поля, но выше текста (50-220)
+        photo_mask = (gray < white_level - 30) & (gray > 50)
+
+        # Морфология: убрать мелкий шум, склеить близкие пиксели
+        kernel_open = np.ones((5, 5), np.uint8)
+        cleaned = cv2.morphologyEx((photo_mask * 255).astype(np.uint8), cv2.MORPH_OPEN, kernel_open)
+
+        # Найти контуры без агрессивной дилатации
+        contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # Группируем похожие контуры
+        boxes = self._merge_nearby_contours(list(contours), h, w, page_area)
+
+        return boxes
+
+    def _merge_nearby_contours(
+        self, contours: list[MatLike], h: int, w: int, page_area: float
+    ) -> list[BoundingBox]:
+        """Сгруппировать близкие контуры в прямоугольные области-фото."""
+        candidates: list[tuple[int, int, int, int, float]] = []
+
+        for contour in contours:
+            x, y, cw, ch = cv2.boundingRect(contour)
+            area = cv2.contourArea(contour)
+
+            if area < 5000:
+                continue
+
+            # Не на самых краях (заголовки/колонтитулы)
+            if y < 50 or y + ch > h - 50:
+                continue
+
+            candidates.append((x, y, cw, ch, area))
+
+        if not candidates:
+            return []
+
+        # Группируем по вертикальной близости (< 100px)
+        candidates.sort(key=lambda c: (c[1], c[0]))
+        groups: list[list[tuple[int, int, int, int, float]]] = []
+        current_group = [candidates[0]]
+
+        for c in candidates[1:]:
+            prev_y2 = current_group[-1][1] + current_group[-1][3]
+            if c[1] - prev_y2 < 100:
+                current_group.append(c)
+            else:
+                groups.append(current_group)
+                current_group = [c]
+        groups.append(current_group)
+
+        # Для каждой группы берём объединённый bounding box
+        boxes: list[BoundingBox] = []
+        for group in groups:
+            x_min = min(c[0] for c in group)
+            y_min = min(c[1] for c in group)
+            x_max = max(c[0] + c[2] for c in group)
+            y_max = max(c[1] + c[3] for c in group)
+            cw = x_max - x_min
+            ch = y_max - y_min
+
+            area_ratio = (cw * ch) / page_area
+            if area_ratio >= self._settings.min_area_ratio:
+                boxes.append(BoundingBox(x=x_min, y=y_min, width=cw, height=ch))
+
         return boxes
 
     def _accept_contour(self, contour: MatLike, page_area: float) -> BoundingBox | None:

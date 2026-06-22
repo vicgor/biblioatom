@@ -145,6 +145,20 @@ def _embedded_from_dict(data: dict[str, object]) -> EmbeddedContent:
     )
 
 
+def _extract_page_no_from_html(pagehtml: str) -> str | None:
+    """Извлечь печатный номер страницы из HTML (<p class='page'/'page-no'>)."""
+    for m in _P_RE.finditer(pagehtml):
+        attrs = m.group("attrs") or ""
+        body = m.group("body") or ""
+        class_match = _CLASS_RE.search(attrs)
+        classes = class_match.group(1).split() if class_match else []
+        if "page" in classes or "page-no" in classes:
+            text = strip_tags_preserve_text(body).strip()
+            if text:
+                return text
+    return None
+
+
 def page_to_model(page: int, content: EmbeddedContent, print_page: str | None = None) -> PageModel:
     """Построить :class:`PageModel` из содержимого страницы.
 
@@ -156,6 +170,10 @@ def page_to_model(page: int, content: EmbeddedContent, print_page: str | None = 
     pagehtml = clean_pagehtml(content.pagehtml)
     normalized = EmbeddedContent(valid=content.valid, pagetext=pagetext, pagehtml=pagehtml)
     elements = extract_blocks(pagehtml, page=page, fallback_text=pagetext)
+
+    if print_page is None:
+        print_page = _extract_page_no_from_html(content.pagehtml)
+
     return PageModel(page=page, print_page=print_page, content=normalized, elements=elements)
 
 
