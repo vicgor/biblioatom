@@ -186,7 +186,10 @@ class Fetcher:
         ext = self._dump_ext(content_type)
         slug = hashlib.md5(url.encode()).hexdigest()[:12]
         path = Path(tempfile.gettempdir()) / f"biblioatom_{slug}{ext}"
-        path.write_text(response.text, encoding="utf-8")
+        try:
+            path.write_text(response.text, encoding="utf-8")
+        except OSError:
+            return
         _logger.debug(
             "fetch.response_dumped",
             url=url,
