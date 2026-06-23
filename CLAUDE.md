@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Этот файл — инструкция для Claude Code при работе с репозиторием.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Контекст проекта
 
@@ -17,6 +17,9 @@ uv sync
 # Запуск CLI
 uv run biblioatom --help
 uv run biblioatom fetch kapitsa_1994 -o book.json
+uv run biblioatom analyze kapitsa_1994          # скачать и показать структуру
+uv run biblioatom analyze book.json             # без сети — из локального JSON
+uv run biblioatom analyze book.json --json      # вывод в JSON
 uv run biblioatom pipeline kapitsa_1994 --images --azw3 -o book.epub
 
 # Качество кода
@@ -54,7 +57,7 @@ src/biblioatom/
 │   ├── __init__.py          — только Protocol-интерфейсы (DI-контракты)
 │   ├── fetcher.py           — httpx.Client + tenacity (retry только transient: 408/429/5xx)
 │   ├── parser.py            — selectolax: parse_book_meta, parse_toc, parse_embedded_content
-│   ├── source_utils.py      — нормализация SOURCE-аргумента CLI (URL или book_id)
+│   ├── source_utils.py      — book_id_from_source: нормализация URL / plain ID → book_id
 │   ├── structure_analyzer.py — split_by_toc / split_into_chapters + StructureAnalyzer
 │   ├── html_cleaner.py      — normalize_text, clean_pagehtml, strip_tags_preserve_text
 │   ├── ris_parser.py        — parse_ris/parse_ris_file, entry_to_ris/entries_to_ris, toc_to_ris
@@ -110,6 +113,8 @@ CLI (cli.py)
 | `ElementKind` | StrEnum: CAPTION / FOOTNOTE / NOTE / EPIGRAPH / QUOTE / SIDEBAR / HEADING / LIST_ / TABLE |
 | `BookElement` | Типизированный блок (kind, text, page, anchor, ref) |
 | `TocEntry` | Запись оглавления (title, author, page, print_page, level) |
+| `BookMeta` | Метаданные книги (title, author, book_id, max_page) |
+| `EmbeddedContent` | Встроенный HTML-контент страницы (pagetext, pagehtml, valid) |
 | `PageModel` | Страница с EmbeddedContent, list[BookElement] и флагом `is_cover` |
 | `StructuredChapter` | Глава с pages и elements |
 | `StructuredDocument` | Книга: title, book_id, source, toc, chapters |
@@ -118,6 +123,9 @@ CLI (cli.py)
 | `ImageAsset` | Сохранённый файл иллюстрации (path, page, caption, width, height) |
 | `RisEntry` | Библиографическая запись RIS (type, authors, title, year, …) |
 | `BuildResult` | Результат сборки (book_id, outputs, images) |
+| `FetchedBook` | Результат fetch_book (pages, toc, title, book_id) — в `core/fetch_book.py` |
+| `ScanExtractionResult` | Результат extract_scan_images — в `core/extract_scan_images.py` |
+| `PipelineResult` | Результат run_pipeline — в `core/run_pipeline.py` |
 
 ## Конфигурация (`config.py`)
 
