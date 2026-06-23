@@ -128,20 +128,25 @@ class ScanExtractor:
         k = self._settings.blur_kernel
         blurred = cv2.GaussianBlur(gray, (k, k), 0)
 
-        # Адаптивная пороговая фильтрация для выделения тёмных областей
-        # blockSize=51 — размер окна для вычисления порога
-        # C=10 — константа, вычитаемая из среднего
+        # Адаптивная пороговая фильтрация для выделения тёмных областей.
+        s = self._settings
         mask = cv2.adaptiveThreshold(
-            blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 51, 10
+            blurred,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            s.adaptive_block_size,
+            s.adaptive_c,
         )
 
         # Морфология: закрыть разрывы, убрать мелкий шум
-        m = self._settings.morph_kernel
+        m = s.morph_kernel
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (m, m))
-        closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=s.dark_morph_close_iter)
 
         # Убрать мелкие объекты (шум)
-        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        ko = s.dark_open_kernel
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (ko, ko))
         closed = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
         return closed.astype(np.uint8)
@@ -172,7 +177,8 @@ class ScanExtractor:
 
         # Fallback 2: поиск крупных тёмных областей без чётких рамок.
         # Если fallback 1 нашёл только мелкие объекты, ищем по-другому.
-        if not boxes or all((b.width * b.height) / page_area < 0.05 for b in boxes):
+        small_ratio = self._settings.small_region_area_ratio
+        if not boxes or all((b.width * b.height) / page_area < small_ratio for b in boxes):
             large_boxes = self._detect_large_dark_regions(scan, page_area)
             if large_boxes:
                 boxes = large_boxes
@@ -190,22 +196,25 @@ class ScanExtractor:
         gray = cv2.cvtColor(scan, cv2.COLOR_BGR2GRAY)
         h, w = gray.shape
 
-        # Определяем уровень белого по полям страницы (крайние 50px)
+        s = self._settings
+        m = s.margin_px
+        # Определяем уровень белого по полям страницы (крайние margin_px px)
         margins = np.concatenate(
             [
-                gray[:, :50].ravel(),
-                gray[:, -50:].ravel(),
-                gray[:50, :].ravel(),
-                gray[-50:, :].ravel(),
+                gray[:, :m].ravel(),
+                gray[:, -m:].ravel(),
+                gray[:m, :].ravel(),
+                gray[-m:, :].ravel(),
             ]
         )
-        white_level = float(np.percentile(margins, 95))
+        white_level = float(np.percentile(margins, s.white_percentile))
 
-        # Фото: яркость ниже белого поля, но выше текста (50-220)
-        photo_mask = (gray < white_level - 30) & (gray > 50)
+        # Фото: яркость ниже белого поля, но выше текста
+        photo_mask = (gray < white_level - s.white_offset) & (gray > s.dark_lower_bound)
 
         # Морфология: убрать мелкий шум, склеить близкие пиксели
-        kernel_open = np.ones((5, 5), np.uint8)
+        ko = self._settings.dark_open_kernel
+        kernel_open = np.ones((ko, ko), np.uint8)
         cleaned = cv2.morphologyEx((photo_mask * 255).astype(np.uint8), cv2.MORPH_OPEN, kernel_open)
 
         # Найти контуры без агрессивной дилатации
@@ -226,11 +235,12 @@ class ScanExtractor:
             x, y, cw, ch = cv2.boundingRect(contour)
             area = cv2.contourArea(contour)
 
-            if area < 5000:
+            if area < self._settings.min_contour_area:
                 continue
 
             # Не на самых краях (заголовки/колонтитулы)
-            if y < 50 or y + ch > h - 50:
+            m = self._settings.margin_px
+            if y < m or y + ch > h - m:
                 continue
 
             candidates.append((x, y, cw, ch, area))
@@ -238,14 +248,14 @@ class ScanExtractor:
         if not candidates:
             return []
 
-        # Группируем по вертикальной близости (< 100px)
+        # Группируем по вертикальной близости (< merge_gap_px)
         candidates.sort(key=lambda c: (c[1], c[0]))
         groups: list[list[tuple[int, int, int, int, float]]] = []
         current_group = [candidates[0]]
 
         for c in candidates[1:]:
             prev_y2 = current_group[-1][1] + current_group[-1][3]
-            if c[1] - prev_y2 < 100:
+            if c[1] - prev_y2 < self._settings.merge_gap_px:
                 current_group.append(c)
             else:
                 groups.append(current_group)

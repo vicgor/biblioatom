@@ -85,8 +85,13 @@ def _extract_images(
     cover_assets: list[ImageAsset] = []
 
     cover_pages = [p for p in book.pages if p.is_cover]
-    assert len(cover_pages) <= 1, f"Expected at most one cover page, got {len(cover_pages)}"
-    for cover in cover_pages:
+    if len(cover_pages) > 1:
+        _logger.warning(
+            "run_pipeline.multiple_cover_pages",
+            count=len(cover_pages),
+            pages=[p.page for p in cover_pages],
+        )
+    for cover in cover_pages[:1]:
         try:
             data = fetcher.fetch_image(book.book_id, cover.page)
             raw_path = images_dir / f"{cover.page:04d}_cover.jpg"
