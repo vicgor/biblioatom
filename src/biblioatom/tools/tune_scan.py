@@ -98,11 +98,7 @@ def _precision_recall_f1(
 
     precision = tp / len(pred)
     recall = tp / len(gt)
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if (precision + recall) > 0
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     return precision, recall, f1
 
 
@@ -140,9 +136,7 @@ def evaluate(
         for p in pred_boxes:
             best = max((_iou(p, g) for g in gt_boxes), default=0.0)
             matched_ious.append(best)
-        mean_img_iou = (
-            sum(matched_ious) / len(matched_ious) if matched_ious else 0.0
-        )
+        mean_img_iou = sum(matched_ious) / len(matched_ious) if matched_ious else 0.0
         all_iou.append(mean_img_iou)
 
     return {
@@ -176,9 +170,7 @@ PARAM_GRID: dict[str, list[Any]] = {
 
 def _random_config() -> ScanExtractionSettings:
     """Сэмплировать одну случайную конфигурацию из PARAM_GRID."""
-    params: dict[str, Any] = {
-        k: random.choice(v) for k, v in PARAM_GRID.items()
-    }
+    params: dict[str, Any] = {k: random.choice(v) for k, v in PARAM_GRID.items()}
     for odd_key in (
         "blur_kernel",
         "morph_kernel",
@@ -241,72 +233,36 @@ def run_optuna_search(  # noqa: PLR0915
     try:
         import optuna  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RuntimeError(
-            "optuna не установлен. Выполните: uv add optuna"
-        ) from exc
+        raise RuntimeError("optuna не установлен. Выполните: uv add optuna") from exc
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     def objective(trial: Any) -> float:
         params: dict[str, Any] = {
-            "blur_kernel": trial.suggest_categorical(
-                "blur_kernel", [3, 5, 7, 9]
-            ),
-            "canny_threshold1": trial.suggest_float(
-                "canny_threshold1", 20.0, 100.0, step=5.0
-            ),
-            "canny_threshold2": trial.suggest_float(
-                "canny_threshold2", 80.0, 250.0, step=10.0
-            ),
-            "morph_kernel": trial.suggest_categorical(
-                "morph_kernel", [5, 7, 9, 11, 13]
-            ),
+            "blur_kernel": trial.suggest_categorical("blur_kernel", [3, 5, 7, 9]),
+            "canny_threshold1": trial.suggest_float("canny_threshold1", 20.0, 100.0, step=5.0),
+            "canny_threshold2": trial.suggest_float("canny_threshold2", 80.0, 250.0, step=10.0),
+            "morph_kernel": trial.suggest_categorical("morph_kernel", [5, 7, 9, 11, 13]),
             "morph_iterations": trial.suggest_int("morph_iterations", 1, 3),
-            "min_area_ratio": trial.suggest_float(
-                "min_area_ratio", 0.005, 0.06, step=0.005
-            ),
-            "max_area_ratio": trial.suggest_float(
-                "max_area_ratio", 0.7, 0.95, step=0.05
-            ),
-            "min_aspect": trial.suggest_float(
-                "min_aspect", 0.1, 0.4, step=0.05
-            ),
-            "max_aspect": trial.suggest_float(
-                "max_aspect", 3.0, 7.0, step=0.5
-            ),
-            "min_fill_ratio": trial.suggest_float(
-                "min_fill_ratio", 0.3, 0.7, step=0.05
-            ),
-            "min_rectangularity": trial.suggest_float(
-                "min_rectangularity", 0.5, 0.9, step=0.05
-            ),
+            "min_area_ratio": trial.suggest_float("min_area_ratio", 0.005, 0.06, step=0.005),
+            "max_area_ratio": trial.suggest_float("max_area_ratio", 0.7, 0.95, step=0.05),
+            "min_aspect": trial.suggest_float("min_aspect", 0.1, 0.4, step=0.05),
+            "max_aspect": trial.suggest_float("max_aspect", 3.0, 7.0, step=0.5),
+            "min_fill_ratio": trial.suggest_float("min_fill_ratio", 0.3, 0.7, step=0.05),
+            "min_rectangularity": trial.suggest_float("min_rectangularity", 0.5, 0.9, step=0.05),
             "adaptive_block_size": trial.suggest_categorical(
                 "adaptive_block_size", [21, 31, 41, 51, 61, 71, 101]
             ),
-            "adaptive_c": trial.suggest_float(
-                "adaptive_c", 2.0, 20.0, step=1.0
-            ),
-            "dark_morph_close_iter": trial.suggest_int(
-                "dark_morph_close_iter", 1, 4
-            ),
-            "dark_open_kernel": trial.suggest_categorical(
-                "dark_open_kernel", [3, 5, 7, 9]
-            ),
+            "adaptive_c": trial.suggest_float("adaptive_c", 2.0, 20.0, step=1.0),
+            "dark_morph_close_iter": trial.suggest_int("dark_morph_close_iter", 1, 4),
+            "dark_open_kernel": trial.suggest_categorical("dark_open_kernel", [3, 5, 7, 9]),
             "small_region_area_ratio": trial.suggest_float(
                 "small_region_area_ratio", 0.01, 0.10, step=0.01
             ),
-            "white_offset": trial.suggest_float(
-                "white_offset", 10.0, 50.0, step=5.0
-            ),
-            "white_percentile": trial.suggest_float(
-                "white_percentile", 90.0, 99.0, step=1.0
-            ),
-            "merge_gap_px": trial.suggest_int(
-                "merge_gap_px", 30, 200, step=10
-            ),
-            "min_contour_area": trial.suggest_int(
-                "min_contour_area", 2000, 15000, step=1000
-            ),
+            "white_offset": trial.suggest_float("white_offset", 10.0, 50.0, step=5.0),
+            "white_percentile": trial.suggest_float("white_percentile", 90.0, 99.0, step=1.0),
+            "merge_gap_px": trial.suggest_int("merge_gap_px", 30, 200, step=10),
+            "min_contour_area": trial.suggest_int("min_contour_area", 2000, 15000, step=1000),
             "crop_padding": trial.suggest_int("crop_padding", 0, 12, step=2),
             "margin_px": trial.suggest_int("margin_px", 20, 100, step=10),
         }
@@ -383,9 +339,7 @@ def tune(
     ] = 5,
     optuna_storage: Annotated[
         str | None,
-        typer.Option(
-            help="Optuna storage URL (sqlite:///study.db). По умолчанию — in-memory."
-        ),
+        typer.Option(help="Optuna storage URL (sqlite:///study.db). По умолчанию — in-memory."),
     ] = None,
 ) -> None:
     """Подбор оптимальных констант ScanExtractionSettings."""
@@ -395,14 +349,10 @@ def tune(
     )
 
     if not images.is_dir():
-        typer.echo(
-            f"ERROR: --images должен быть папкой: {images}", err=True
-        )
+        typer.echo(f"ERROR: --images должен быть папкой: {images}", err=True)
         raise typer.Exit(2)
     if not gt.exists():
-        typer.echo(
-            f"ERROR: файл --gt не найден: {gt}", err=True
-        )
+        typer.echo(f"ERROR: файл --gt не найден: {gt}", err=True)
         raise typer.Exit(2)
 
     image_paths = sorted(
@@ -411,30 +361,21 @@ def tune(
         if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".tiff", ".bmp"}
     )
     if not image_paths:
-        typer.echo(
-            f"ERROR: не найдено изображений в {images}", err=True
-        )
+        typer.echo(f"ERROR: не найдено изображений в {images}", err=True)
         raise typer.Exit(2)
 
     gt_data: GroundTruth = {}
     for item in json.loads(gt.read_text()):
         gt_data[item["image"]] = [
-            (int(b[0]), int(b[1]), int(b[2]), int(b[3]))
-            for b in item["boxes"]
+            (int(b[0]), int(b[1]), int(b[2]), int(b[3])) for b in item["boxes"]
         ]
 
-    typer.echo(
-        f"Режим: {mode}  |"
-        f"  изображений: {len(image_paths)}  |"
-        f"  попыток: {trials}"
-    )
+    typer.echo(f"Режим: {mode}  |  изображений: {len(image_paths)}  |  попыток: {trials}")
 
     t_start = time.perf_counter()
 
     if mode == "grid":
-        results = run_grid_search(
-            image_paths, gt_data, trials, iou_threshold
-        )
+        results = run_grid_search(image_paths, gt_data, trials, iou_threshold)
     elif mode == "optuna":
         results = run_optuna_search(
             image_paths,
@@ -449,9 +390,7 @@ def tune(
 
     total_s = time.perf_counter() - t_start
 
-    results.sort(
-        key=lambda r: (r["mean_f1"], r["mean_iou"]), reverse=True
-    )
+    results.sort(key=lambda r: (r["mean_f1"], r["mean_iou"]), reverse=True)
 
     output.write_text(json.dumps(results, indent=2, ensure_ascii=False))
     typer.echo(f"\nГотово за {total_s:.1f}с. Результаты → {output}")
@@ -468,19 +407,14 @@ def tune(
             f"rect={p.get('min_rectangularity')} "
             f"adap={p.get('adaptive_block_size')} C={p.get('adaptive_c')}"
         )
-        typer.echo(
-            f"{rank:<4}  {r['mean_f1']:>6.3f}  {r['mean_iou']:>6.3f}  {snippet}"
-        )
+        typer.echo(f"{rank:<4}  {r['mean_f1']:>6.3f}  {r['mean_iou']:>6.3f}  {snippet}")
 
     if results:
         best = results[0]["params"]
         env_lines = "\n".join(
-            f"BIBLIOATOM_SCAN_EXTRACTION__{k.upper()}={v}"
-            for k, v in best.items()
+            f"BIBLIOATOM_SCAN_EXTRACTION__{k.upper()}={v}" for k, v in best.items()
         )
-        typer.echo(
-            f"\n# Лучшая конфигурация — вставьте в .env:\n{env_lines}"
-        )
+        typer.echo(f"\n# Лучшая конфигурация — вставьте в .env:\n{env_lines}")
 
 
 if __name__ == "__main__":
