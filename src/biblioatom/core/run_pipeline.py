@@ -29,7 +29,7 @@ from biblioatom.core.extract_scan_images import (
     select_photo_pages,
 )
 from biblioatom.core.fetch_book import FetchedBook, fetch_book
-from biblioatom.errors import FetchError, InputValidationError
+from biblioatom.errors import FetchError, ImageProcessingError, InputValidationError
 from biblioatom.logging_config import get_logger, set_correlation_id
 from biblioatom.models import ImageAsset
 from biblioatom.services import (
@@ -105,6 +105,11 @@ def _extract_images(
                 cdn_page=cover.page,
                 error=str(exc),
             )
+        except OSError as exc:
+            raise ImageProcessingError(
+                "Failed to write cover image to disk.",
+                context={"path": str(images_dir)},
+            ) from exc
 
     photo_pages = select_photo_pages(book.pages)
     _logger.info("run_pipeline.scan_pages_selected", count=len(photo_pages))
@@ -121,7 +126,13 @@ def _extract_images(
             )
             continue
         raw_path = images_dir / f"{photo.page:04d}_raw.jpg"
-        raw_path.write_bytes(data)
+        try:
+            raw_path.write_bytes(data)
+        except OSError as exc:
+            raise ImageProcessingError(
+                "Failed to write scan to disk.",
+                context={"page": photo.page, "path": str(raw_path)},
+            ) from exc
         scans.append((photo.page, raw_path))
 
     result = extract_scan_images(scan_extractor, image_processor, scans, images_dir)

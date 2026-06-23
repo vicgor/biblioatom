@@ -18,12 +18,9 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import cv2
-import numpy as np
-
 from biblioatom.errors import ImageProcessingError, ScanExtractionError
 from biblioatom.logging_config import get_logger
-from biblioatom.models import BoundingBox, ElementKind, ExtractedImage, ImageAsset, PageModel
+from biblioatom.models import ElementKind, ImageAsset, PageModel
 from biblioatom.services import ImageProcessorProtocol, ScanExtractorProtocol
 
 _logger = get_logger(__name__)
@@ -124,26 +121,9 @@ def extract_scan_images(
         try:
             data = scan_path.read_bytes()
             crops = extractor.extract(data, page)
-            if crops:
-                for index, crop in enumerate(crops):
-                    out_path = out_dir / f"{page:04d}_{index:02d}"
-                    result.images.append(processor.process(crop, out_path))
-            else:
-                buf = np.frombuffer(data, dtype=np.uint8)
-                scan = cv2.imdecode(buf, cv2.IMREAD_COLOR)
-                if scan is None:
-                    raise ScanExtractionError(
-                        "Failed to decode scan for full-image fallback.",
-                        context={"page": page},
-                    )
-                h, w = scan.shape[:2]
-                full = ExtractedImage(
-                    page=page,
-                    data=data,
-                    box=BoundingBox(x=0, y=0, width=w, height=h),
-                )
-                out_path = out_dir / f"{page:04d}_full"
-                result.images.append(processor.process(full, out_path))
+            for index, crop in enumerate(crops):
+                out_path = out_dir / f"{page:04d}_{index:02d}"
+                result.images.append(processor.process(crop, out_path))
         except (ScanExtractionError, ImageProcessingError, OSError) as exc:
             # Best-effort: сбой одного скана не должен ронять обработку остальных.
             result.failed_scans.append(scan_path)

@@ -152,6 +152,13 @@ class ScanExtractionSettings(BaseModel):
             "Порог площади (доля от страницы) ниже которого fallback-1 объект считается 'мелким'."
         ),
     )
+    # fallback 3: вернуть весь скан как одно изображение, если ничего не найдено
+    full_image_fallback: bool = Field(
+        default=True,
+        description=(
+            "Если все методы детекции вернули пусто — вернуть весь скан как одно изображение."
+        ),
+    )
 
     @field_validator("blur_kernel", "morph_kernel", "adaptive_block_size")
     @classmethod

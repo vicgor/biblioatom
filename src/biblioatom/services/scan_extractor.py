@@ -183,6 +183,11 @@ class ScanExtractor:
             if large_boxes:
                 boxes = large_boxes
 
+        # Fallback 3: вернуть весь скан как одно изображение.
+        if not boxes and self._settings.full_image_fallback:
+            h, w = scan.shape[:2]
+            boxes.append(BoundingBox(x=0, y=0, width=w, height=h))
+
         # Стабильный порядок: сверху-вниз, затем слева-направо.
         boxes.sort(key=lambda b: (b.y, b.x))
         return boxes

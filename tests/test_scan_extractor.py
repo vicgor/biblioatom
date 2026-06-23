@@ -94,7 +94,8 @@ def test_text_noise_is_filtered_out() -> None:
             word_w = int(rng.integers(20, 55))
             cv2.rectangle(page, (col, row), (col + word_w, row + 12), (40, 40, 40), -1)
 
-    extractor = ScanExtractor()
+    settings = ScanExtractionSettings(full_image_fallback=False)
+    extractor = ScanExtractor(settings)
     result = extractor.extract(_encode(page), page=3)
 
     assert result == []
@@ -125,7 +126,8 @@ def test_too_small_object_is_rejected() -> None:
     # ~0.6% площади страницы при min_area_ratio=0.02 → отбрасывается.
     _draw_filled_rect(page, x=300, y=400, w=70, h=70)
 
-    extractor = ScanExtractor()
+    settings = ScanExtractionSettings(full_image_fallback=False)
+    extractor = ScanExtractor(settings)
     assert extractor.extract(_encode(page), page=1) == []
 
 
@@ -136,7 +138,8 @@ def test_too_elongated_object_is_rejected() -> None:
     # Очень широкая тонкая полоса: aspect = 600/20 = 30 >> max_aspect (5).
     _draw_filled_rect(page, x=80, y=480, w=600, h=20)
 
-    extractor = ScanExtractor()
+    settings = ScanExtractionSettings(full_image_fallback=False)
+    extractor = ScanExtractor(settings)
     assert extractor.extract(_encode(page), page=1) == []
 
 
@@ -150,9 +153,26 @@ def test_low_fill_object_is_rejected() -> None:
     page = _blank_page()
     cv2.line(page, (150, 200), (550, 700), (30, 30, 30), thickness=5)
 
-    settings = ScanExtractionSettings(use_canny=False, min_fill_ratio=0.5)
+    settings = ScanExtractionSettings(
+        use_canny=False, min_fill_ratio=0.5, full_image_fallback=False
+    )  # noqa: E501
     extractor = ScanExtractor(settings)
     assert extractor.extract(_encode(page), page=1) == []
+
+
+def test_full_image_fallback_when_no_crops_found() -> None:
+    """При full_image_fallback=True пустая страница возвращает один кроп на весь скан."""
+
+    page = _blank_page()
+    settings = ScanExtractionSettings(full_image_fallback=True)
+    extractor = ScanExtractor(settings)
+    result = extractor.extract(_encode(page), page=2)
+
+    assert len(result) == 1
+    assert result[0].box.x == 0
+    assert result[0].box.y == 0
+    assert result[0].box.width == _PAGE_W
+    assert result[0].box.height == _PAGE_H
 
 
 def test_empty_bytes_raise_domain_error() -> None:

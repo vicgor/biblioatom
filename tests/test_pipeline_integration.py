@@ -199,7 +199,7 @@ class _FakeScanExtractor:
 class _FakeImageProcessor:
     """Мок-постобработчик, реализующий ``ImageProcessorProtocol``."""
 
-    def process(self, image: object, out_path: Path) -> ImageAsset:
+    def process(self, image: ExtractedImage, out_path: Path) -> ImageAsset:
         path = out_path.with_suffix(".jpg")
         path.write_bytes(b"\xff\xd8\xff")
         return ImageAsset(page=0, path=path)
