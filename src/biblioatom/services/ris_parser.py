@@ -106,7 +106,8 @@ def entry_to_ris(entry: RisEntry) -> str:
     if entry.type:
         lines.append(_format_ris_line("TY", entry.type))
     for author in entry.authors:
-        lines.append(_format_ris_line("AU", author))
+        if author:
+            lines.append(_format_ris_line("AU", author))
     if entry.title:
         lines.append(_format_ris_line("TI", entry.title))
     if entry.year:
@@ -122,7 +123,8 @@ def entry_to_ris(entry: RisEntry) -> str:
     if entry.abstract:
         lines.append(_format_ris_line("AB", entry.abstract))
     for kw in entry.keywords:
-        lines.append(_format_ris_line("KW", kw))
+        if kw:
+            lines.append(_format_ris_line("KW", kw))
     if entry.doi:
         lines.append(_format_ris_line("DO", entry.doi))
     if entry.url:

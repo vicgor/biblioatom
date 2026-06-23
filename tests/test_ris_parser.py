@@ -131,6 +131,17 @@ class TestEntryToRis:
         assert "JO  -" not in ris
         assert "VL  -" not in ris
 
+    def test_empty_authors_omitted_in_output(self) -> None:
+        """Пустые строки в списках authors/keywords не порождают строки AU/KW."""
+        entry = RisEntry(ty="JOUR", au=["", "Автор А."], kw=["", "термодинамика"])
+        ris = entry_to_ris(entry)
+        assert "AU  - Автор А." in ris
+        assert "KW  - термодинамика" in ris
+        # Пустые значения не должны создавать пустые строки в выводе
+        lines = ris.splitlines()
+        assert not any(line.startswith("AU  - ") and line == "AU  - " for line in lines)
+        assert not any(line.startswith("KW  - ") and line == "KW  - " for line in lines)
+
 
 class TestEntriesToRis:
     def test_multiple_entries(self) -> None:

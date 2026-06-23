@@ -180,3 +180,97 @@ def test_crop_padding_expands_box() -> None:
     assert len(result) == 1
     # С паддингом рамка шире самой фигуры.
     assert result[0].box.width >= 300
+
+
+# ---------------------------------------------------------------------------
+# Вспомогательная функция для тестов _merge_nearby_contours
+# ---------------------------------------------------------------------------
+
+
+def _make_rect_contour(x: int, y: int, w: int, h: int) -> np.ndarray:
+    """Прямоугольный контур в формате OpenCV: shape (4, 1, 2), dtype int32."""
+    return np.array([[[x, y]], [[x + w, y]], [[x + w, y + h]], [[x, y + h]]], dtype=np.int32)
+
+
+# ---------------------------------------------------------------------------
+# Тесты методов fallback-детекции
+# ---------------------------------------------------------------------------
+
+
+def test_binarize_dark_regions_marks_boundary_of_dark_rect() -> None:
+    """_binarize_dark_regions помечает область вблизи границ тёмного прямоугольника.
+
+    Adaptive threshold отмечает пиксели, которые темнее локального среднего.
+    Внутри большого тёмного блока все соседи тоже тёмные, поэтому центр не
+    помечается — только полоса шириной ~block_size/2 вдоль каждого края.
+    Морфологическое «закрытие» затем заполняет кольцо изнутри для маленьких
+    объектов, но тест проверяет сам факт детекции у левого края.
+    """
+    page = _blank_page()
+    _draw_filled_rect(page, x=200, y=200, w=300, h=400, color=80)
+
+    mask = ScanExtractor()._binarize_dark_regions(page)
+
+    assert mask.dtype == np.uint8
+    assert mask.shape[:2] == (_PAGE_H, _PAGE_W)
+    # 10px правее левого края (x=200): в зоне адаптивного окна → должен быть помечен.
+    assert mask[300, 210] > 0
+    # Белый фон вдали от прямоугольника → не должен быть помечен.
+    assert mask[50, 50] == 0
+
+
+def test_detect_large_dark_regions_finds_gray_photo() -> None:
+    """_detect_large_dark_regions находит среднесерую (не чёрную) фото-область."""
+    page = _blank_page()
+    _draw_filled_rect(page, x=150, y=150, w=400, h=500, color=120)
+
+    page_area = float(_PAGE_H * _PAGE_W)
+    boxes = ScanExtractor()._detect_large_dark_regions(page, page_area)
+
+    assert len(boxes) == 1
+    assert boxes[0].width == pytest.approx(400, abs=30)
+    assert boxes[0].height == pytest.approx(500, abs=30)
+
+
+def test_detect_large_dark_regions_excludes_margin() -> None:
+    """Области, верхний край которых попадает в margin_px, исключаются."""
+    page = _blank_page()
+    # y=5 < margin_px (default 50) → должна быть исключена.
+    _draw_filled_rect(page, x=100, y=5, w=500, h=400, color=120)
+
+    page_area = float(_PAGE_H * _PAGE_W)
+    boxes = ScanExtractor()._detect_large_dark_regions(page, page_area)
+
+    assert boxes == []
+
+
+def test_merge_nearby_contours_groups_close_rects() -> None:
+    """Контуры ближе merge_gap_px объединяются в один bounding box."""
+    settings = ScanExtractionSettings(merge_gap_px=50, min_contour_area=100, margin_px=10)
+    extractor = ScanExtractor(settings)
+    page_area = float(_PAGE_H * _PAGE_W)
+
+    c1 = _make_rect_contour(x=100, y=100, w=300, h=200)
+    # Верхний край c2 на 30px ниже нижнего края c1 (300→330) — зазор < 50px.
+    c2 = _make_rect_contour(x=100, y=330, w=300, h=200)
+
+    boxes = extractor._merge_nearby_contours([c1, c2], _PAGE_H, _PAGE_W, page_area)
+
+    assert len(boxes) == 1
+    assert boxes[0].y == pytest.approx(100, abs=5)
+    assert boxes[0].height == pytest.approx(430, abs=5)  # 530 - 100
+
+
+def test_merge_nearby_contours_keeps_far_rects_separate() -> None:
+    """Контуры дальше merge_gap_px остаются отдельными bounding box-ами."""
+    settings = ScanExtractionSettings(merge_gap_px=50, min_contour_area=100, margin_px=10)
+    extractor = ScanExtractor(settings)
+    page_area = float(_PAGE_H * _PAGE_W)
+
+    c1 = _make_rect_contour(x=100, y=100, w=300, h=200)
+    # Зазор 200px >> merge_gap_px=50 → отдельные группы.
+    c2 = _make_rect_contour(x=100, y=500, w=300, h=200)
+
+    boxes = extractor._merge_nearby_contours([c1, c2], _PAGE_H, _PAGE_W, page_area)
+
+    assert len(boxes) == 2
