@@ -82,12 +82,10 @@ def _extract_images(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     scans: list[tuple[int, Path]] = []
-
-    from biblioatom.models import ImageAsset
-
     cover_assets: list[ImageAsset] = []
 
     cover_pages = [p for p in book.pages if p.is_cover]
+    assert len(cover_pages) <= 1, f"Expected at most one cover page, got {len(cover_pages)}"
     for cover in cover_pages:
         try:
             data = fetcher.fetch_image(book.book_id, cover.page)

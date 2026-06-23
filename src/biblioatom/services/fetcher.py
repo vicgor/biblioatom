@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -169,11 +170,13 @@ class Fetcher:
         return ".txt"
 
     def _dump_html_if_debug(self, url: str, response: httpx.Response) -> None:
-        """Сохранить тело ответа в /tmp только при уровне DEBUG.
+        """Сохранить тело ответа во временный каталог только при уровне DEBUG.
 
         Расширение файла определяется по Content-Type: .json/.html/.xml/.txt.
         Файл создаётся один раз за URL (имя = MD5-хэш URL), поэтому повторные
-        запросы одной страницы перезаписывают предыдущий дамп, не засоряя /tmp.
+        запросы одной страницы перезаписывают предыдущий дамп, не засоряя каталог.
+        Используется ``tempfile.gettempdir()`` вместо захардкоженного ``/tmp``
+        для корректной работы на Windows и в окружениях с нестандартным TMPDIR.
         Вызов безопасен при любом уровне логирования — тело метода не выполняется
         если DEBUG не активен.
         """
@@ -182,7 +185,7 @@ class Fetcher:
         content_type = response.headers.get("content-type", "")
         ext = self._dump_ext(content_type)
         slug = hashlib.md5(url.encode()).hexdigest()[:12]
-        path = Path("/tmp") / f"biblioatom_{slug}{ext}"
+        path = Path(tempfile.gettempdir()) / f"biblioatom_{slug}{ext}"
         path.write_text(response.text, encoding="utf-8")
         _logger.debug(
             "fetch.response_dumped",

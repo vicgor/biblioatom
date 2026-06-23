@@ -151,19 +151,27 @@ def entries_to_ris_file(entries: list[RisEntry], path: Path) -> None:
 def toc_to_ris(toc: list[TocEntry], *, title: str = "", year: str = "") -> str:
     """Конвертировать список TocEntry (оглавление книги) в текст RIS.
 
-    Создаёт одну запись типа BOOK с главами как AU/TI.
+    Создаёт отдельную запись типа ``CHAP`` на каждую главу оглавления.
+    Название книги помещается в тег ``BT`` (Book Title), что соответствует
+    стандарту RIS для глав из книг и корректно импортируется в Zotero/Mendeley.
+
+    Ранее функция создавала одну запись ``BOOK`` с несколькими тегами ``TI`` —
+    это нарушало стандарт RIS (один ``TI`` на запись).
     """
-    lines: list[str] = ["TY  - BOOK"]
-    if title:
-        lines.append(_format_ris_line("TI", title))
-    if year:
-        lines.append(_format_ris_line("PY", year))
+    records: list[str] = []
     for entry in toc:
+        lines: list[str] = ["TY  - CHAP"]
+        if entry.title:
+            lines.append(_format_ris_line("TI", entry.title))
         if entry.author:
             lines.append(_format_ris_line("AU", entry.author))
-        lines.append(_format_ris_line("TI", entry.title))
-    lines.append("ER  - ")
-    return "\n".join(lines)
+        if title:
+            lines.append(_format_ris_line("BT", title))
+        if year:
+            lines.append(_format_ris_line("PY", year))
+        lines.append("ER  - ")
+        records.append("\n".join(lines))
+    return "\n\n".join(records)
 
 
 __all__ = [

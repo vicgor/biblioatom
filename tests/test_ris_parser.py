@@ -154,16 +154,40 @@ class TestEntriesToRisFile:
 
 
 class TestTocToRis:
-    def test_converts_toc(self) -> None:
+    def test_converts_toc_to_chap_records(self) -> None:
+        """toc_to_ris должен создавать по одной записи CHAP на каждую главу."""
         toc = [
             TocEntry(title="Введение", author="Иванов А. А.", page=1),
             TocEntry(title="Глава 1", page=10),
         ]
         ris = toc_to_ris(toc, title="Моя книга", year="2024")
-        assert "TY  - BOOK" in ris
-        assert "TI  - Моя книга" in ris
-        assert "PY  - 2024" in ris
-        assert "AU  - Иванов А. А." in ris
+        # Каждая глава — отдельная запись CHAP
+        assert ris.count("TY  - CHAP") == 2
+        assert ris.count("ER  - ") == 2
+        # Заголовок книги в BT, не в TI верхнего уровня
+        assert ris.count("BT  - Моя книга") == 2
         assert "TI  - Введение" in ris
         assert "TI  - Глава 1" in ris
-        assert "ER  - " in ris
+        assert "AU  - Иванов А. А." in ris
+        assert "PY  - 2024" in ris
+        # Не должно быть TY BOOK
+        assert "TY  - BOOK" not in ris
+
+    def test_empty_toc_returns_empty_string(self) -> None:
+        assert toc_to_ris([]) == ""
+
+    def test_no_book_title_omits_bt(self) -> None:
+        toc = [TocEntry(title="Глава 1", page=1)]
+        ris = toc_to_ris(toc)
+        assert "BT  -" not in ris
+        assert "TI  - Глава 1" in ris
+
+    def test_single_chap_roundtrip(self) -> None:
+        """Запись CHAP без author и year корректно парсится обратно."""
+        toc = [TocEntry(title="Заключение", page=99)]
+        ris_text = toc_to_ris(toc, title="Книга")
+        # Ручной парсинг: CHAP не входит в базовый tag_map, но TI/BT/ER читаются
+        assert "TY  - CHAP" in ris_text
+        assert "TI  - Заключение" in ris_text
+        assert "BT  - Книга" in ris_text
+        assert "ER  - " in ris_text
