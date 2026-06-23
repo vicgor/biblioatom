@@ -8,9 +8,10 @@ CLI для скачивания книг с [elib.biblioatom.ru](https://elib.bi
 
 - Загрузка страниц и оглавления книги по идентификатору или URL.
 - Структурный анализ: разбивка на главы по TOC сайта (или эвристикой при его отсутствии).
-- Сборка валидного **EPUB 3** (nav, spine, CSS, рабочие двусторонние якоря сносок, встраивание иллюстраций как `<figure>`).
+- Сборка валидного **EPUB 3** (nav, spine, CSS, рабочие двусторонние якоря сносок, обложка, встраивание иллюстраций как `<figure>`).
 - Извлечение иллюстраций со сканов средствами OpenCV (без OCR) и постобработка через Pillow.
 - Конвертация EPUB → **AZW3** через Calibre `ebook-convert`.
+- Импорт/экспорт библиографических данных в формате **RIS** (Zotero, Mendeley, EndNote).
 - Полный сквозной пайплайн одной командой.
 
 ## Требования
@@ -18,7 +19,6 @@ CLI для скачивания книг с [elib.biblioatom.ru](https://elib.bi
 - **Python 3.12+**
 - **[uv](https://docs.astral.sh/uv/)** — менеджер пакетов и окружений
 - **Calibre** (`ebook-convert` в `PATH`) — только для конвертации в AZW3
-- Системные библиотеки для OpenCV (Linux): `libgl1`, `libglib2.0-0` — только для извлечения сканов
 
 ## Установка
 
@@ -87,6 +87,22 @@ uv run biblioatom extract-scans ./scans -o ./images
 uv run biblioatom build book.json -o book.epub
 uv run biblioatom build book.json --chapter-mode normal -o book.epub
 ```
+
+### `import-ris` — импортировать библиографические записи
+
+```bash
+uv run biblioatom import-ris refs.ris -o refs.json
+```
+
+Разбирает RIS-файл и сохраняет список записей в JSON (поля: `source`, `count`, `entries`).
+
+### `export-ris` — экспортировать оглавление в RIS
+
+```bash
+uv run biblioatom export-ris book.json -o book.ris
+```
+
+Создаёт RIS-файл из оглавления книги: одна запись типа `CHAP` на каждую главу, заголовок книги в теге `BT`.
 
 ### `convert` — сконвертировать EPUB в AZW3
 
@@ -215,20 +231,24 @@ src/biblioatom/
 ├── core/              — use cases: оркестрация без I/O-деталей
 │   ├── fetch_book.py         — загрузка метаданных, TOC и страниц (best-effort)
 │   ├── analyze_structure.py  — передача страниц/TOC в анализатор, простановка мета
-│   ├── extract_scan_images.py — отбор фото-страниц, оркестрация кропа/постобработки
+│   ├── extract_scan_images.py — скачивание обложки + отбор фото-страниц + кроп/постобработка
 │   ├── build_epub.py         — передача документа в epub_builder, возврат BuildResult
 │   ├── convert_to_azw3.py    — вызов converter, возврат BuildResult
 │   └── run_pipeline.py       — сквозной пайплайн: fetch → analyze → [scans] → epub → [azw3]
-└── services/          — реализации, внедряемые через typing.Protocol
-    ├── __init__.py          — Protocol-интерфейсы (FetcherProtocol, ParserProtocol, …)
-    ├── fetcher.py           — httpx + tenacity
-    ├── parser.py            — selectolax: метаданные, TOC, embedded content
-    ├── structure_analyzer.py — разбивка на главы (TOC или эвристика заголовков)
-    ├── html_cleaner.py      — нормализация текста и HTML
-    ├── scan_extractor.py    — OpenCV: grayscale→blur→Otsu/Canny→findContours→crop
-    ├── image_processor.py   — Pillow: ресайз, нормализация режима, сохранение
-    ├── epub_builder.py      — EbookLib: EPUB 3, nav, figcaption, якоря сносок
-    └── converter.py         — subprocess ebook-convert (без shell=True)
+├── services/          — реализации, внедряемые через typing.Protocol
+│   ├── __init__.py          — Protocol-интерфейсы (FetcherProtocol, ParserProtocol, …)
+│   ├── fetcher.py           — httpx + tenacity
+│   ├── parser.py            — selectolax: метаданные, TOC, embedded content
+│   ├── source_utils.py      — нормализация SOURCE-аргумента (URL или book_id)
+│   ├── structure_analyzer.py — разбивка на главы (TOC или эвристика заголовков)
+│   ├── html_cleaner.py      — нормализация текста и HTML
+│   ├── ris_parser.py        — разбор и генерация RIS-файлов
+│   ├── scan_extractor.py    — OpenCV: Otsu/Canny + адаптивный fallback → crop
+│   ├── image_processor.py   — Pillow: ресайз, нормализация режима, сохранение
+│   ├── epub_builder.py      — EbookLib: EPUB 3, обложка, nav, figcaption, якоря сносок
+│   └── converter.py         — subprocess ebook-convert (без shell=True)
+└── tools/             — утилиты разработчика
+    └── tune_scan.py   — подбор параметров OpenCV (grid-search / Optuna)
 ```
 
 **Принцип:** CLI не содержит бизнес-логики. Core-слой зависит от сервисов через `typing.Protocol` — use cases тестируются без сети, без OpenCV, без Calibre.
