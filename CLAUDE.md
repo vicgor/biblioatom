@@ -61,8 +61,9 @@ src/biblioatom/
 │   ├── structure_analyzer.py — split_by_toc / split_into_chapters + StructureAnalyzer
 │   ├── html_cleaner.py      — normalize_text, clean_pagehtml, strip_tags_preserve_text
 │   ├── ris_parser.py        — parse_ris/parse_ris_file, entry_to_ris/entries_to_ris, toc_to_ris
-│   ├── scan_extractor.py    — OpenCV: Otsu/Canny + два fallback (_binarize_dark_regions,
-│   │                          _detect_large_dark_regions, _merge_nearby_contours) → crop
+│   ├── scan_extractor.py    — OpenCV: Otsu/Canny → fallback1 (_binarize_dark_regions) →
+│   │                          fallback2 (_detect_large_dark_regions/_merge_nearby_contours) →
+│   │                          fallback3 (full_image_fallback: весь скан как один кроп) → crop
 │   ├── image_processor.py   — Pillow: ресайз до max_width/max_height, конвертация режима, сохранение
 │   ├── epub_builder.py      — EbookLib: EPUB 3, EpubCover + meta[cover], figcaption, якоря сносок
 │   └── converter.py         — subprocess.run(cmd_list) ebook-convert (shell=False)
@@ -145,7 +146,7 @@ BIBLIOATOM_SCAN_EXTRACTION__MARGIN_PX=50          # отступ для искл
 BIBLIOATOM_IMAGE__MAX_WIDTH=1200
 ```
 
-`ScanExtractionSettings` содержит два уровня детекции. Основной пайплайн: `blur_kernel`, `use_canny`, `canny_threshold1/2`, `morph_kernel`, `morph_iterations`, `min_area_ratio`, `max_area_ratio`, `min_aspect`, `max_aspect`, `min_fill_ratio`, `min_rectangularity`, `crop_padding`. Fallback-параметры: `merge_gap_px`, `min_contour_area`, `margin_px`, `white_percentile`, `white_offset`, `dark_lower_bound`, `adaptive_block_size`, `adaptive_c`, `dark_morph_close_iter`, `dark_open_kernel`, `small_region_area_ratio`.
+`ScanExtractionSettings` содержит три уровня детекции. Основной пайплайн: `blur_kernel`, `use_canny`, `canny_threshold1/2`, `morph_kernel`, `morph_iterations`, `min_area_ratio`, `max_area_ratio`, `min_aspect`, `max_aspect`, `min_fill_ratio`, `min_rectangularity`, `crop_padding`. Fallback 1–2: `merge_gap_px`, `min_contour_area`, `margin_px`, `white_percentile`, `white_offset`, `dark_lower_bound`, `adaptive_block_size`, `adaptive_c`, `dark_morph_close_iter`, `dark_open_kernel`, `small_region_area_ratio`. Fallback 3: `full_image_fallback` (bool, default `True`) — если все методы вернули пусто, возвращает весь скан как один кроп.
 
 ## Тесты
 
