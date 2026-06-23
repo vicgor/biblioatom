@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Этот файл — инструкция для Claude Code при работе с репозиторием.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Контекст проекта
 
@@ -17,6 +17,9 @@ uv sync
 # Запуск CLI
 uv run biblioatom --help
 uv run biblioatom fetch kapitsa_1994 -o book.json
+uv run biblioatom analyze kapitsa_1994          # скачать и показать структуру
+uv run biblioatom analyze book.json             # без сети — из локального JSON
+uv run biblioatom analyze book.json --json      # вывод в JSON
 uv run biblioatom pipeline kapitsa_1994 --images --azw3 -o book.epub
 
 # Качество кода
@@ -54,6 +57,7 @@ src/biblioatom/
     ├── __init__.py          — только Protocol-интерфейсы (DI-контракты)
     ├── fetcher.py           — httpx.Client + tenacity (retry только transient: 408/429/5xx)
     ├── parser.py            — selectolax: parse_book_meta, parse_toc, parse_embedded_content
+    ├── source_utils.py      — book_id_from_source: нормализация URL / plain ID → book_id
     ├── structure_analyzer.py — split_by_toc / split_into_chapters + StructureAnalyzer
     ├── html_cleaner.py      — normalize_text, clean_pagehtml, strip_tags_preserve_text
     ├── scan_extractor.py    — OpenCV: grayscale→GaussianBlur→Otsu/Canny→morphology→findContours→crop
@@ -105,12 +109,18 @@ CLI (cli.py)
 | `ElementKind` | StrEnum: CAPTION / FOOTNOTE / NOTE / EPIGRAPH / QUOTE / SIDEBAR / HEADING / LIST_ / TABLE |
 | `BookElement` | Типизированный блок (kind, text, page, anchor, ref) |
 | `TocEntry` | Запись оглавления (title, author, page, print_page, level) |
+| `BookMeta` | Метаданные книги (title, author, book_id, …) |
+| `EmbeddedContent` | Встроенный HTML-контент страницы (html, images) |
 | `PageModel` | Страница с EmbeddedContent и list[BookElement] |
 | `StructuredChapter` | Глава с pages и elements |
 | `StructuredDocument` | Книга: title, book_id, toc, chapters |
+| `BoundingBox` | Координаты прямоугольника на скане (x, y, w, h) + area |
 | `ExtractedImage` | Кроп со скана (bytes + BoundingBox) |
 | `ImageAsset` | Сохранённый файл иллюстрации (path, page, caption) |
 | `BuildResult` | Результат сборки (book_id, outputs, images) |
+| `FetchedBook` | Результат fetch_book (pages, toc, title, book_id) — в `core/fetch_book.py` |
+| `ScanExtractionResult` | Результат extract_scan_images — в `core/extract_scan_images.py` |
+| `PipelineResult` | Результат run_pipeline — в `core/run_pipeline.py` |
 
 ## Конфигурация (`config.py`)
 
@@ -156,6 +166,7 @@ tests/
 
 Scan-тесты генерируют синтетические страницы через numpy — бинарные фикстуры не нужны.
 Integration-тест использует `_FakeFetcher` (реализует `FetcherProtocol`) + реальные сервисы.
+Файлы `tests/test_fetch.py` и `tests/test_convert.py` — legacy-тесты для stdlib-модулей; исключены из ruff, но pytest их запускает.
 
 ## Конвенции
 
