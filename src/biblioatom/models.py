@@ -157,9 +157,10 @@ class ImageAsset(_Base):
 class RisEntry(_Base):
     """Запись в формате RIS (Research Information Systems)."""
 
-    type: str = Field(alias="ty")
+    type: str = Field(default="", alias="ty")
     authors: list[str] = Field(default_factory=list, alias="au")
     title: str = Field(default="", alias="ti")
+    book_title: str = Field(default="", alias="bt")
     year: str = Field(default="", alias="py")
     journal: str = Field(default="", alias="jo")
     volume: str = Field(default="", alias="vl")
