@@ -29,7 +29,7 @@ from biblioatom.core.extract_scan_images import (
     select_photo_pages,
 )
 from biblioatom.core.fetch_book import FetchedBook, fetch_book
-from biblioatom.errors import FetchError, InputValidationError
+from biblioatom.errors import FetchError, ImageProcessingError, InputValidationError
 from biblioatom.logging_config import get_logger, set_correlation_id
 from biblioatom.models import ImageAsset
 from biblioatom.services import (
@@ -80,10 +80,40 @@ def _extract_images(
     """
 
     images_dir.mkdir(parents=True, exist_ok=True)
+
+    scans: list[tuple[int, Path]] = []
+    cover_assets: list[ImageAsset] = []
+
+    cover_pages = [p for p in book.pages if p.is_cover]
+    if len(cover_pages) > 1:
+        _logger.warning(
+            "run_pipeline.multiple_cover_pages",
+            count=len(cover_pages),
+            pages=[p.page for p in cover_pages],
+        )
+    for cover in cover_pages[:1]:
+        try:
+            data = fetcher.fetch_image(book.book_id, cover.page)
+            raw_path = images_dir / f"{cover.page:04d}_cover.jpg"
+            raw_path.write_bytes(data)
+            asset = ImageAsset(page=cover.page, path=raw_path)
+            cover_assets.append(asset)
+            _logger.info("run_pipeline.cover_fetched", cdn_page=cover.page)
+        except FetchError as exc:
+            _logger.warning(
+                "run_pipeline.cover_fetch_failed",
+                cdn_page=cover.page,
+                error=str(exc),
+            )
+        except OSError as exc:
+            raise ImageProcessingError(
+                "Failed to write cover image to disk.",
+                context={"path": str(images_dir)},
+            ) from exc
+
     photo_pages = select_photo_pages(book.pages)
     _logger.info("run_pipeline.scan_pages_selected", count=len(photo_pages))
 
-    scans: list[tuple[int, Path]] = []
     for photo in photo_pages:
         try:
             data = fetcher.fetch_image(book.book_id, photo.cdn_page)
@@ -95,11 +125,19 @@ def _extract_images(
                 error=str(exc),
             )
             continue
-        raw_path = images_dir / f"{photo.page:04d}_raw.bin"
-        raw_path.write_bytes(data)
+        raw_path = images_dir / f"{photo.page:04d}_raw.jpg"
+        try:
+            raw_path.write_bytes(data)
+        except OSError as exc:
+            raise ImageProcessingError(
+                "Failed to write scan to disk.",
+                context={"page": photo.page, "path": str(raw_path)},
+            ) from exc
         scans.append((photo.page, raw_path))
 
-    return extract_scan_images(scan_extractor, image_processor, scans, images_dir)
+    result = extract_scan_images(scan_extractor, image_processor, scans, images_dir)
+    result.images = cover_assets + result.images
+    return result
 
 
 def run_pipeline(

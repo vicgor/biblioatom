@@ -126,7 +126,6 @@ class EpubBuilder:
         images: list[ImageAsset],
     ) -> BuildResult:
         book = epub.EpubBook()
-        # uid из book_id (или заголовка) — стабильный идентификатор издания.
         uid = document.book_id or document.title or "biblioatom-book"
         book.set_identifier(uid)
         book.set_title(document.title or "Untitled")
@@ -134,7 +133,6 @@ class EpubBuilder:
         if document.source:
             book.add_author(document.source)
 
-        # CSS-стиль, подключаемый ко всем XHTML-документам.
         css_text = self._settings.css or _DEFAULT_CSS
         style = epub.EpubItem(
             uid="style",
@@ -144,11 +142,10 @@ class EpubBuilder:
         )
         book.add_item(style)
 
-        # Индекс изображений по странице: только первый ассет на страницу
-        # (дедупликация манифеста, как в legacy ``_img_for_page``).
         images_by_page = self._index_images(images)
         embedded: dict[int, str] = {}
         used_images: list[ImageAsset] = []
+        pages_placed: set[int] = set()
 
         chapter_items: list[epub.EpubHtml] = []
         toc_links: list[epub.Link] = []
@@ -160,6 +157,7 @@ class EpubBuilder:
                 images_by_page,
                 embedded,
                 book,
+                pages_placed,
             )
             xhtml.add_item(style)
             book.add_item(xhtml)
@@ -167,16 +165,24 @@ class EpubBuilder:
             toc_links.append(epub.Link(xhtml.file_name, chapter.title or f"Глава {idx}", xhtml.id))
             used_images.extend(chapter_images)
 
-        # TOC (для nav и ncx) и навигационные элементы.
+        cover_asset = images_by_page.get(0)
+        if cover_asset is not None:
+            cover_href = f"images/{cover_asset.path.name}"
+            cover_img = epub.EpubCover(
+                uid="cover-img",
+                file_name=cover_href,
+            )
+            cover_img.content = cover_asset.path.read_bytes()
+            book.add_item(cover_img)
+            embedded[cover_asset.page] = cover_href
+            used_images.insert(0, cover_asset)
+            book.add_metadata(None, "meta", "", others={"name": "cover", "content": "cover-img"})
+
         book.toc = tuple(toc_links)
-        # EpubNcx — совместимость с EPUB2-ридерами; EpubNav — обязательный для
-        # EPUB3 навигационный документ (properties="nav", <nav epub:type="toc">).
         book.add_item(epub.EpubNcx())
         nav = epub.EpubNav()
         book.add_item(nav)
 
-        # Spine включает nav-документ первым, затем главы. Это даёт корректный
-        # EPUB3 spine (а не осиротевший nav, как в legacy).
         book.spine = [nav, *chapter_items]
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,6 +209,7 @@ class EpubBuilder:
         images_by_page: dict[int, ImageAsset],
         embedded: dict[int, str],
         book: epub.EpubBook,
+        pages_placed: set[int],
     ) -> tuple[epub.EpubHtml, list[ImageAsset]]:
         """Отрендерить главу в один XHTML-документ EPUB.
 
@@ -214,15 +221,33 @@ class EpubBuilder:
         if chapter.author:
             body.append(f'<p class="chapter-subtitle">{escape(chapter.author)}</p>')
 
-        # Сноски накапливаются и выводятся в конце главы единым блоком <aside>.
         footnotes: list[BookElement] = []
         chapter_images: list[ImageAsset] = []
 
         embed = self._settings.embed_images
+        pages_with_images = set(images_by_page.keys()) if embed else set()
+
+        page_print_map: dict[int, str] = {}
+        for pg in chapter.pages:
+            if pg.print_page is not None:
+                page_print_map[pg.page] = pg.print_page
+
+        current_page: int | None = None
+
         for block in chapter.elements:
             text = block.text.strip()
             if not text:
                 continue
+
+            if block.page != current_page:
+                current_page = block.page
+                print_no = page_print_map.get(current_page, str(current_page))
+                body.append(
+                    f'<span epub:type="pagebreak" role="doc-pagebreak" '
+                    f'id="page_{escape(print_no)}" '
+                    f'aria-label="{escape(print_no)}"></span>'
+                )
+
             if block.kind == ElementKind.FOOTNOTE:
                 footnotes.append(block)
                 n = len(footnotes)
@@ -232,13 +257,14 @@ class EpubBuilder:
                 continue
             if block.kind == ElementKind.CAPTION:
                 asset = images_by_page.get(block.page) if embed else None
-                if asset is not None:
+                if asset is not None and block.page != 0:
                     href = self._ensure_image(asset, embedded, book)
                     if asset not in chapter_images:
                         chapter_images.append(asset)
+                    pages_placed.add(block.page)
                     body.append(
                         "<figure>"
-                        f'<img src="{escape(href)}" alt="{escape(text[:120])}"/>'
+                        f'<img src="../{escape(href)}" alt="{escape(text[:120])}"/>'
                         f"<figcaption>{escape(text)}</figcaption>"
                         "</figure>"
                     )
@@ -246,6 +272,18 @@ class EpubBuilder:
                     body.append(f'<p class="image-caption">{escape(text)}</p>')
                 continue
             body.append(f"<p>{escape(text)}</p>")
+
+        if embed:
+            chapter_page_nums = {p.page for p in chapter.pages}
+            for page_no in sorted(pages_with_images - pages_placed):
+                if page_no == 0 or page_no not in chapter_page_nums:
+                    continue
+                asset = images_by_page[page_no]
+                href = self._ensure_image(asset, embedded, book)
+                if asset not in chapter_images:
+                    chapter_images.append(asset)
+                pages_placed.add(page_no)
+                body.append(f'<figure><img src="../{escape(href)}" alt=""/></figure>')
 
         if footnotes:
             body.append('<section class="footnotes" epub:type="footnotes">')

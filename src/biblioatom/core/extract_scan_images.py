@@ -30,10 +30,9 @@ _logger = get_logger(__name__)
 class PhotoPage:
     """Страница-кандидат с иллюстрацией.
 
-    ``cdn_page`` — номер, под которым JPG лежит в CDN. Он равен печатному номеру
-    страницы (``print_page``), который в исходных данных всегда на единицу меньше
-    физического 0-based индекса RPC; при отсутствии печатного номера берётся
-    ``page - 1`` (как в legacy-реализации).
+    ``cdn_page`` — номер, под которым JPG лежит в CDN (``page:04d`` в URL).
+    Совпадает с ``print_page`` если он есть (печатный номер страницы),
+    иначе — с RPC-индексом ``page`` (0-based; обложка = 0 → ``0000.jpg``).
     """
 
     page: int
@@ -63,13 +62,21 @@ def _first_caption(page: PageModel) -> str | None:
 
 
 def _cdn_page_for(page: PageModel) -> int:
-    """Вычислить CDN-номер страницы (печатный номер или ``page - 1``)."""
+    """Вычислить CDN-номер страницы для загрузки скана.
+
+    Приоритеты:
+    1. ``print_page`` — печатный номер из HTML-разметки (``<p class="page-no">``);
+       он совпадает с именем файла на CDN (``0001.jpg`` → print_page == "1").
+    2. ``page`` (RPC-индекс 0-based) — используется как есть в качестве fallback;
+       страница 0 это обложка → CDN-файл ``0000.jpg``.
+    """
 
     if page.print_page is not None:
         stripped = page.print_page.strip()
         if stripped.isdigit():
             return int(stripped)
-    return page.page - 1
+    # Fallback: RPC-индекс == CDN-номер (оба 0-based; обложка = 0).
+    return page.page
 
 
 def select_photo_pages(pages: Sequence[PageModel]) -> list[PhotoPage]:
@@ -82,6 +89,10 @@ def select_photo_pages(pages: Sequence[PageModel]) -> list[PhotoPage]:
 
     photo_pages: list[PhotoPage] = []
     for page in pages:
+        # Обложка обрабатывается отдельно (run_pipeline) и не должна
+        # попадать в список фото-страниц иллюстраций.
+        if page.is_cover:
+            continue
         caption = _first_caption(page)
         if caption is None:
             continue
@@ -108,7 +119,8 @@ def extract_scan_images(
 
     for page, scan_path in scans:
         try:
-            crops = extractor.extract(scan_path.read_bytes(), page)
+            data = scan_path.read_bytes()
+            crops = extractor.extract(data, page)
             for index, crop in enumerate(crops):
                 out_path = out_dir / f"{page:04d}_{index:02d}"
                 result.images.append(processor.process(crop, out_path))

@@ -20,6 +20,7 @@ from biblioatom.errors import InputValidationError
 from biblioatom.models import (
     BookMeta,
     EmbeddedContent,
+    ExtractedImage,
     ImageAsset,
     TocEntry,
 )
@@ -191,14 +192,14 @@ def test_pipeline_converts_to_azw3_with_fake_converter(tmp_path: Path) -> None:
 class _FakeScanExtractor:
     """Мок-извлекатель сканов, реализующий ``ScanExtractorProtocol``."""
 
-    def extract(self, image: bytes, page: int) -> list[object]:
+    def extract(self, image: bytes, page: int) -> list[ExtractedImage]:
         return []
 
 
 class _FakeImageProcessor:
     """Мок-постобработчик, реализующий ``ImageProcessorProtocol``."""
 
-    def process(self, image: object, out_path: Path) -> ImageAsset:
+    def process(self, image: ExtractedImage, out_path: Path) -> ImageAsset:
         path = out_path.with_suffix(".jpg")
         path.write_bytes(b"\xff\xd8\xff")
         return ImageAsset(page=0, path=path)
@@ -223,5 +224,6 @@ def test_pipeline_extracts_scans_best_effort(tmp_path: Path) -> None:
     )
 
     _assert_valid_epub(result.epub_path)
-    # Извлекатель вернул 0 кропов — пайплайн остаётся валидным (best-effort).
-    assert result.images == []
+    # Обложка (page=0) всегда включается; кропов 0 — пайплайн остаётся валидным.
+    assert len(result.images) == 1
+    assert result.images[0].page == 0

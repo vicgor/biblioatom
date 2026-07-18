@@ -81,10 +81,15 @@ class EmbeddedContent(_Base):
 
 
 class PageModel(_Base):
-    """Модель одной страницы книги."""
+    """Модель одной страницы книги.
+
+    ``is_cover`` — True для обложки (RPC-индекс 0). Скан обложки хранится
+    под именем ``0000.jpg`` и не имеет печатного номера.
+    """
 
     page: int = Field(ge=0)
     print_page: str | None = None
+    is_cover: bool = False
     content: EmbeddedContent
     elements: list[BookElement] = Field(default_factory=list)
 
@@ -149,6 +154,28 @@ class ImageAsset(_Base):
     height: int | None = Field(default=None, ge=0)
 
 
+class RisEntry(_Base):
+    """Запись в формате RIS (Research Information Systems)."""
+
+    type: str = Field(alias="ty")
+    authors: list[str] = Field(default_factory=list, alias="au")
+    title: str = Field(default="", alias="ti")
+    year: str = Field(default="", alias="py")
+    journal: str = Field(default="", alias="jo")
+    volume: str = Field(default="", alias="vl")
+    issue: str = Field(default="", alias="is_")
+    pages: str = Field(default="", alias="sp")
+    abstract: str = Field(default="", alias="ab")
+    keywords: list[str] = Field(default_factory=list, alias="kw")
+    doi: str = Field(default="", alias="do")
+    url: str = Field(default="", alias="ur")
+    publisher: str = Field(default="", alias="pb")
+    city: str = Field(default="", alias="cy")
+    notes: str = Field(default="", alias="n1")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class BuildResult(_Base):
     """Результат сборки выходных файлов."""
 
@@ -167,6 +194,7 @@ __all__ = [
     "ExtractedImage",
     "ImageAsset",
     "PageModel",
+    "RisEntry",
     "StructuredChapter",
     "StructuredDocument",
     "TocEntry",

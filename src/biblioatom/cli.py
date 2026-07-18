@@ -515,6 +515,59 @@ def pipeline(
             console.print(f"  AZW3 → {result.azw3_path}")
 
 
+@app.command(name="import-ris")
+def import_ris(
+    ctx: typer.Context,
+    ris_file: Annotated[
+        Path,
+        typer.Argument(help="Путь к RIS-файлу."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Путь итогового JSON."),
+    ] = Path("ris_import.json"),
+) -> None:
+    """Импортировать библиографические записи из RIS-файла."""
+    verbose: bool = ctx.obj[_VERBOSE]
+    with _handle_errors(verbose=verbose):
+        from biblioatom.services.ris_parser import parse_ris_file
+
+        entries = parse_ris_file(ris_file)
+
+        payload = {
+            "source": str(ris_file),
+            "count": len(entries),
+            "entries": [entry.model_dump(by_alias=True) for entry in entries],
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        console.print(f"[green]✓[/green] Импортировано {len(entries)} записей → {output}")
+
+
+@app.command(name="export-ris")
+def export_ris(
+    ctx: typer.Context,
+    input_json: Annotated[
+        Path,
+        typer.Argument(help="JSON с оглавлением книги (вывод команды fetch)."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o", help="Путь итогового RIS-файла."),
+    ] = Path("export.ris"),
+) -> None:
+    """Экспортировать оглавление книги в формат RIS."""
+    verbose: bool = ctx.obj[_VERBOSE]
+    with _handle_errors(verbose=verbose):
+        from biblioatom.services.ris_parser import toc_to_ris
+
+        pages, toc, title, book_id, _ = _load_book_from_json(input_json)
+        ris_text = toc_to_ris(toc, title=title)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(ris_text, encoding="utf-8")
+        console.print(f"[green]✓[/green] Экспортировано {len(toc)} записей TOC → {output}")
+
+
 def main_entry() -> None:
     """Точка входа консольного скрипта ``biblioatom`` (см. ``pyproject.toml``)."""
     app()

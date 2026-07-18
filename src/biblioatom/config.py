@@ -71,23 +71,100 @@ class ScanExtractionSettings(BaseModel):
     """
 
     blur_kernel: int = Field(default=5, ge=1)
-    min_area_ratio: float = Field(default=0.02, ge=0, le=1)
+    min_area_ratio: float = Field(default=0.012, ge=0, le=1)
     max_area_ratio: float = Field(default=0.9, ge=0, le=1)
     min_aspect: float = Field(default=0.2, gt=0)
     max_aspect: float = Field(default=5.0, gt=0)
-    min_fill_ratio: float = Field(default=0.5, ge=0, le=1)
-    min_rectangularity: float = Field(default=0.7, ge=0, le=1)
+    min_fill_ratio: float = Field(default=0.52, ge=0, le=1)
+    min_rectangularity: float = Field(default=0.72, ge=0, le=1)
     use_canny: bool = True
     canny_threshold1: float = Field(default=50.0, ge=0)
     canny_threshold2: float = Field(default=150.0, ge=0)
     morph_kernel: int = Field(default=9, ge=1)
-    morph_iterations: int = Field(default=1, ge=0)
+    morph_iterations: int = Field(default=2, ge=0)
     crop_padding: int = Field(default=4, ge=0)
+    merge_gap_px: int = Field(
+        default=100,
+        ge=1,
+        description="Порог вертикальной близости контуров при группировке (пикселей).",
+    )
+    min_contour_area: int = Field(
+        default=40000,
+        ge=1,
+        description="Минимальная площадь контура в пикселях (отсев текстового шума).",
+    )
+    margin_px: int = Field(
+        default=50,
+        ge=1,
+        description=(
+            "Ширина полей страницы для оценки уровня белого и исключения колонтитулов (пикселей)."
+            " Должна быть ≥ 1: при 0 срез gray[:, -0:] вернул бы всю страницу, а не поле."
+        ),
+    )
+    white_percentile: float = Field(
+        default=95.0,
+        ge=50.0,
+        le=100.0,
+        description="Перцентиль яркости полей для определения уровня белого.",
+    )
+    white_offset: float = Field(
+        default=35.0,
+        ge=0.0,
+        description=(
+            "Отступ от уровня белого вниз: пиксели темнее"
+            " (white_level - white_offset) считаются фото."
+        ),
+    )
+    dark_lower_bound: int = Field(
+        default=55,
+        ge=0,
+        le=255,
+        description="Нижний порог яркости фото-пикселей (отсев чёрного текста/артефактов).",
+    )
+    # _binarize_dark_regions
+    adaptive_block_size: int = Field(
+        default=51,
+        ge=3,
+        description="Размер окна адаптивной бинаризации (нечётное число).",
+    )
+    adaptive_c: float = Field(
+        default=10.0,
+        description="Константа C для adaptiveThreshold (вычитается из среднего).",
+    )
+    dark_morph_close_iter: int = Field(
+        default=2,
+        ge=1,
+        description="Число итераций морфологического закрытия в _binarize_dark_regions.",
+    )
+    dark_open_kernel: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Размер ядра MORPH_OPEN для удаления шума"
+            " в _binarize_dark_regions и _detect_large_dark_regions."
+        ),
+    )
+    # _detect_boxes (fallback 2)
+    small_region_area_ratio: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Порог площади (доля от страницы) ниже которого fallback-1 объект считается 'мелким'."
+        ),
+    )
+    # fallback 3: вернуть весь скан как одно изображение, если ничего не найдено
+    full_image_fallback: bool = Field(
+        default=True,
+        description=(
+            "Если все методы детекции вернули пусто — вернуть весь скан как одно изображение."
+        ),
+    )
 
-    @field_validator("blur_kernel", "morph_kernel")
+    @field_validator("blur_kernel", "morph_kernel", "adaptive_block_size")
     @classmethod
     def _validate_odd_kernel(cls, v: int) -> int:
-        """Размер ядра OpenCV должен быть нечётным (требование GaussianBlur)."""
+        """Размер ядра OpenCV должен быть нечётным (требование GaussianBlur/adaptiveThreshold)."""
 
         if v % 2 == 0:
             raise ValueError("Размер ядра должен быть нечётным.")

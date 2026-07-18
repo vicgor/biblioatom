@@ -45,25 +45,30 @@ src/biblioatom/
 ├── config.py          — pydantic-settings: 9 групп, префикс BIBLIOATOM_, разделитель __
 ├── errors.py          — BookgrabError → ConfigurationError/FetchError/… + ExitCode enum
 ├── logging_config.py  — structlog: correlation_id, redact секретов, JSON/pretty авто
-├── models.py          — Pydantic v2: ElementKind, BookElement, PageModel, StructuredDocument, …
+├── models.py          — Pydantic v2: ElementKind, BookElement, PageModel, RisEntry, …
 ├── core/              — use cases (оркестрация, без I/O-деталей)
 │   ├── fetch_book.py         — загрузка: meta + TOC + страницы (best-effort по ошибкам страниц)
 │   ├── analyze_structure.py  — передача pages/toc в анализатор, простановка title/book_id
-│   ├── extract_scan_images.py — select_photo_pages + оркестрация ScanExtractor/ImageProcessor
+│   ├── extract_scan_images.py — скачивание обложки + select_photo_pages + ScanExtractor/ImageProcessor
 │   ├── build_epub.py         — передача StructuredDocument в epub_builder
 │   ├── convert_to_azw3.py    — вызов converter с логированием
 │   └── run_pipeline.py       — сквозной: fetch→analyze→[scans]→epub→[azw3], PipelineResult
-└── services/
-    ├── __init__.py          — только Protocol-интерфейсы (DI-контракты)
-    ├── fetcher.py           — httpx.Client + tenacity (retry только transient: 408/429/5xx)
-    ├── parser.py            — selectolax: parse_book_meta, parse_toc, parse_embedded_content
-    ├── source_utils.py      — book_id_from_source: нормализация URL / plain ID → book_id
-    ├── structure_analyzer.py — split_by_toc / split_into_chapters + StructureAnalyzer
-    ├── html_cleaner.py      — normalize_text, clean_pagehtml, strip_tags_preserve_text
-    ├── scan_extractor.py    — OpenCV: grayscale→GaussianBlur→Otsu/Canny→morphology→findContours→crop
-    ├── image_processor.py   — Pillow: ресайз до max_width/max_height, конвертация режима, сохранение
-    ├── epub_builder.py      — EbookLib: EPUB 3, nav, spine, figcaption, двусторонние якоря сносок
-    └── converter.py         — subprocess.run(cmd_list) ebook-convert (shell=False)
+├── services/
+│   ├── __init__.py          — только Protocol-интерфейсы (DI-контракты)
+│   ├── fetcher.py           — httpx.Client + tenacity (retry только transient: 408/429/5xx)
+│   ├── parser.py            — selectolax: parse_book_meta, parse_toc, parse_embedded_content
+│   ├── source_utils.py      — book_id_from_source: нормализация URL / plain ID → book_id
+│   ├── structure_analyzer.py — split_by_toc / split_into_chapters + StructureAnalyzer
+│   ├── html_cleaner.py      — normalize_text, clean_pagehtml, strip_tags_preserve_text
+│   ├── ris_parser.py        — parse_ris/parse_ris_file, entry_to_ris/entries_to_ris, toc_to_ris
+│   ├── scan_extractor.py    — OpenCV: Otsu/Canny → fallback1 (_binarize_dark_regions) →
+│   │                          fallback2 (_detect_large_dark_regions/_merge_nearby_contours) →
+│   │                          fallback3 (full_image_fallback: весь скан как один кроп) → crop
+│   ├── image_processor.py   — Pillow: ресайз до max_width/max_height, конвертация режима, сохранение
+│   ├── epub_builder.py      — EbookLib: EPUB 3, EpubCover + meta[cover], figcaption, якоря сносок
+│   └── converter.py         — subprocess.run(cmd_list) ebook-convert (shell=False)
+└── tools/                   — developer utilities (не часть публичного API)
+    └── tune_scan.py         — подбор параметров ScanExtractionSettings: grid-search или Optuna
 ```
 
 ## Поток данных
@@ -109,14 +114,15 @@ CLI (cli.py)
 | `ElementKind` | StrEnum: CAPTION / FOOTNOTE / NOTE / EPIGRAPH / QUOTE / SIDEBAR / HEADING / LIST_ / TABLE |
 | `BookElement` | Типизированный блок (kind, text, page, anchor, ref) |
 | `TocEntry` | Запись оглавления (title, author, page, print_page, level) |
-| `BookMeta` | Метаданные книги (title, author, book_id, …) |
-| `EmbeddedContent` | Встроенный HTML-контент страницы (html, images) |
-| `PageModel` | Страница с EmbeddedContent и list[BookElement] |
+| `BookMeta` | Метаданные книги (title, author, book_id, max_page) |
+| `EmbeddedContent` | Встроенный HTML-контент страницы (pagetext, pagehtml, valid) |
+| `PageModel` | Страница с EmbeddedContent, list[BookElement] и флагом `is_cover` |
 | `StructuredChapter` | Глава с pages и elements |
-| `StructuredDocument` | Книга: title, book_id, toc, chapters |
-| `BoundingBox` | Координаты прямоугольника на скане (x, y, w, h) + area |
-| `ExtractedImage` | Кроп со скана (bytes + BoundingBox) |
-| `ImageAsset` | Сохранённый файл иллюстрации (path, page, caption) |
+| `StructuredDocument` | Книга: title, book_id, source, toc, chapters |
+| `BoundingBox` | Прямоугольник (x, y, width, height) — координаты кропа скана |
+| `ExtractedImage` | Кроп со скана (data: bytes, box: BoundingBox, caption) |
+| `ImageAsset` | Сохранённый файл иллюстрации (path, page, caption, width, height) |
+| `RisEntry` | Библиографическая запись RIS (type, authors, title, year, …) |
 | `BuildResult` | Результат сборки (book_id, outputs, images) |
 | `FetchedBook` | Результат fetch_book (pages, toc, title, book_id) — в `core/fetch_book.py` |
 | `ScanExtractionResult` | Результат extract_scan_images — в `core/extract_scan_images.py` |
@@ -135,8 +141,12 @@ BIBLIOATOM_HTTP__MAX_RETRIES=5
 BIBLIOATOM_LOGGING__LEVEL=DEBUG
 BIBLIOATOM_CONVERSION__EBOOK_CONVERT_BIN=/opt/calibre/ebook-convert
 BIBLIOATOM_SCAN_EXTRACTION__MIN_AREA_RATIO=0.03
+BIBLIOATOM_SCAN_EXTRACTION__MERGE_GAP_PX=30      # склейка близких контуров (px)
+BIBLIOATOM_SCAN_EXTRACTION__MARGIN_PX=50          # отступ для исключения колонтитулов
 BIBLIOATOM_IMAGE__MAX_WIDTH=1200
 ```
+
+`ScanExtractionSettings` содержит три уровня детекции. Основной пайплайн: `blur_kernel`, `use_canny`, `canny_threshold1/2`, `morph_kernel`, `morph_iterations`, `min_area_ratio`, `max_area_ratio`, `min_aspect`, `max_aspect`, `min_fill_ratio`, `min_rectangularity`, `crop_padding`. Fallback 1–2: `merge_gap_px`, `min_contour_area`, `margin_px`, `white_percentile`, `white_offset`, `dark_lower_bound`, `adaptive_block_size`, `adaptive_c`, `dark_morph_close_iter`, `dark_open_kernel`, `small_region_area_ratio`. Fallback 3: `full_image_fallback` (bool, default `True`) — если все методы вернули пусто, возвращает весь скан как один кроп.
 
 ## Тесты
 
@@ -160,13 +170,13 @@ tests/
 ├── test_models.py               — Pydantic-модели и валидация
 ├── test_parser.py               — Parser (selectolax): TOC, meta, content
 ├── test_pipeline_integration.py — E2E без сети: FakeFetcher + реальные сервисы
-├── test_scan_extractor.py       — ScanExtractor: синтетические сканы numpy/OpenCV
+├── test_ris_parser.py           — parse_ris, entry_to_ris, toc_to_ris
+├── test_scan_extractor.py       — ScanExtractor: синтетические сканы + fallback-методы
 └── test_structure_analyzer.py   — split_by_toc, split_into_chapters, эвристики
 ```
 
 Scan-тесты генерируют синтетические страницы через numpy — бинарные фикстуры не нужны.
 Integration-тест использует `_FakeFetcher` (реализует `FetcherProtocol`) + реальные сервисы.
-Файлы `tests/test_fetch.py` и `tests/test_convert.py` — legacy-тесты для stdlib-модулей; исключены из ruff, но pytest их запускает.
 
 ## Конвенции
 
@@ -180,6 +190,5 @@ Integration-тест использует `_FakeFetcher` (реализует `Fe
 
 ## Известные технические долги
 
-- `fetch.py` и `convert.py` — legacy stdlib-реализации (925 строк), исключены из ruff/mypy через `extend-exclude`. Подлежат удалению или переносу из `src/` после полной миграции.
 - `ElementKind.LIST = "list_"` — сериализованное значение отличается от имени члена; при необходимости совместимости с внешними форматами учитывать при десериализации.
 - `get_logger()` возвращает `Any` — временный компромисс для совместимости с API structlog.

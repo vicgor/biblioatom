@@ -21,7 +21,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeVar
 from urllib.parse import quote
 
@@ -151,6 +155,49 @@ class Fetcher:
         )
         return retrying(fn)
 
+    # -- отладочный дамп HTML -----------------------------------------------
+
+    @staticmethod
+    def _dump_ext(content_type: str) -> str:
+        """Определить расширение файла дампа по Content-Type заголовку."""
+        ct = content_type.lower()
+        if "json" in ct:
+            return ".json"
+        if "html" in ct:
+            return ".html"
+        if "xml" in ct:
+            return ".xml"
+        return ".txt"
+
+    def _dump_html_if_debug(self, url: str, response: httpx.Response) -> None:
+        """Сохранить тело ответа во временный каталог только при уровне DEBUG.
+
+        Расширение файла определяется по Content-Type: .json/.html/.xml/.txt.
+        Файл создаётся один раз за URL (имя = MD5-хэш URL), поэтому повторные
+        запросы одной страницы перезаписывают предыдущий дамп, не засоряя каталог.
+        Используется ``tempfile.gettempdir()`` вместо захардкоженного ``/tmp``
+        для корректной работы на Windows и в окружениях с нестандартным TMPDIR.
+        Вызов безопасен при любом уровне логирования — тело метода не выполняется
+        если DEBUG не активен.
+        """
+        if not logging.getLogger(__name__).isEnabledFor(logging.DEBUG):
+            return
+        content_type = response.headers.get("content-type", "")
+        ext = self._dump_ext(content_type)
+        slug = hashlib.md5(url.encode()).hexdigest()[:12]
+        path = Path(tempfile.gettempdir()) / f"biblioatom_{slug}{ext}"
+        try:
+            path.write_text(response.text, encoding="utf-8")
+        except OSError:
+            return
+        _logger.debug(
+            "fetch.response_dumped",
+            url=url,
+            path=str(path),
+            content_type=content_type,
+            size_bytes=len(response.content),
+        )
+
     # -- низкоуровневый GET --------------------------------------------------
 
     def _get(self, url: str) -> httpx.Response:
@@ -190,6 +237,7 @@ class Fetcher:
                 "HTTP request returned an error status.",
                 context={"url": url, "status_code": response.status_code},
             )
+        self._dump_html_if_debug(url, response)
         return response
 
     # -- публичный API (FetcherProtocol) -----------------------------------
