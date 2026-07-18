@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from biblioatom.config import get_settings
@@ -77,3 +79,18 @@ def test_even_blur_kernel_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ConfigurationError):
         get_settings()
+
+
+def test_app_work_dir_default() -> None:
+    """Дефолтный путь работной директории — Path('books')."""
+
+    settings = get_settings()
+    assert settings.app.work_dir == Path("books")
+
+
+def test_app_work_dir_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Путь работной директории может быть переопределён через env."""
+
+    monkeypatch.setenv("BIBLIOATOM_APP__WORK_DIR", "/tmp/mybooks")
+    settings = get_settings()
+    assert settings.app.work_dir == Path("/tmp/mybooks")

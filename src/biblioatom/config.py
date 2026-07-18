@@ -12,6 +12,8 @@ Image/Epub/Conversion/Logging). Значения читаются из пере�
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,6 +27,7 @@ class AppSettings(BaseModel):
     rpc_path: str = "/rpc/bookviewer/cp/"
     output_dir: str = "output"
     user_agent: str = "biblioatom/0.2 (+https://github.com/vicgor/biblioatom)"
+    work_dir: Path = Path("books")
 
 
 class HttpSettings(BaseModel):
