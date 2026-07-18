@@ -96,6 +96,24 @@ class TestParseRis:
         entries = parse_ris(ris)
         assert len(entries) == 0
 
+    def test_bt_tag_parsed_into_book_title(self) -> None:
+        """Тег BT (Book Title) сохраняется в поле book_title, а не теряется."""
+        ris = "TY  - CHAP\nTI  - Глава 1\nBT  - Моя книга\nER  -\n"
+        entries = parse_ris(ris)
+        assert len(entries) == 1
+        assert entries[0].title == "Глава 1"
+        assert entries[0].book_title == "Моя книга"
+
+    def test_entry_without_ty_does_not_abort_file(self) -> None:
+        """Запись без TY парсится с пустым type и не рушит остальные записи."""
+        ris = "TI  - Без типа\nPY  - 2024\nER  -\n\nTY  - JOUR\nTI  - Второй\nER  -\n"
+        entries = parse_ris(ris)
+        assert len(entries) == 2
+        assert entries[0].type == ""
+        assert entries[0].title == "Без типа"
+        assert entries[1].type == "JOUR"
+        assert entries[1].title == "Второй"
+
 
 class TestParseRisFile:
     def test_reads_file(self, tmp_path: Path) -> None:
@@ -130,6 +148,12 @@ class TestEntryToRis:
         ris = entry_to_ris(entry)
         assert "JO  -" not in ris
         assert "VL  -" not in ris
+
+    def test_book_title_emitted(self) -> None:
+        """Поле book_title сериализуется в тег BT."""
+        entry = RisEntry(ty="CHAP", ti="Глава", bt="Книга")
+        ris = entry_to_ris(entry)
+        assert "BT  - Книга" in ris
 
     def test_empty_authors_omitted_in_output(self) -> None:
         """Пустые строки в списках authors/keywords не порождают строки AU/KW."""
@@ -202,3 +226,15 @@ class TestTocToRis:
         assert "TI  - Заключение" in ris_text
         assert "BT  - Книга" in ris_text
         assert "ER  - " in ris_text
+
+    def test_toc_roundtrip_preserves_book_title(self) -> None:
+        """toc_to_ris → parse_ris сохраняет название книги, главу, автора и год."""
+        toc = [TocEntry(title="Заключение", author="Иванов А. А.", page=99)]
+        ris_text = toc_to_ris(toc, title="Книга", year="2024")
+        entries = parse_ris(ris_text)
+        assert len(entries) == 1
+        assert entries[0].type == "CHAP"
+        assert entries[0].title == "Заключение"
+        assert entries[0].book_title == "Книга"
+        assert entries[0].year == "2024"
+        assert "Иванов А. А." in entries[0].authors

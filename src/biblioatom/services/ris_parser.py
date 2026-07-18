@@ -34,6 +34,7 @@ def parse_ris(text: str) -> list[RisEntry]:
         "ty": "ty",
         "au": "au",
         "ti": "ti",
+        "bt": "bt",
         "py": "py",
         "jo": "jo",
         "vl": "vl",
@@ -110,6 +111,8 @@ def entry_to_ris(entry: RisEntry) -> str:
             lines.append(_format_ris_line("AU", author))
     if entry.title:
         lines.append(_format_ris_line("TI", entry.title))
+    if entry.book_title:
+        lines.append(_format_ris_line("BT", entry.book_title))
     if entry.year:
         lines.append(_format_ris_line("PY", entry.year))
     if entry.journal:
