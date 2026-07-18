@@ -122,7 +122,7 @@ CLI (cli.py)
 | `BoundingBox` | Прямоугольник (x, y, width, height) — координаты кропа скана |
 | `ExtractedImage` | Кроп со скана (data: bytes, box: BoundingBox, caption) |
 | `ImageAsset` | Сохранённый файл иллюстрации (path, page, caption, width, height) |
-| `RisEntry` | Библиографическая запись RIS (type, authors, title, year, …) |
+| `RisEntry` | Библиографическая запись RIS (type, authors, title, `book_title`/alias `bt`, year, …). `book_title` (тег BT) хранит название книги для записей CHAP из `toc_to_ris` — парсится и сериализуется симметрично, чтобы round-trip не терял заголовок. |
 | `BuildResult` | Результат сборки (book_id, outputs, images) |
 | `FetchedBook` | Результат fetch_book (pages, toc, title, book_id) — в `core/fetch_book.py` |
 | `ScanExtractionResult` | Результат extract_scan_images — в `core/extract_scan_images.py` |
