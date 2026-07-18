@@ -49,10 +49,12 @@ src/biblioatom/
 ├── core/              — use cases (оркестрация, без I/O-деталей)
 │   ├── fetch_book.py         — загрузка: meta + TOC + страницы (best-effort по ошибкам страниц)
 │   ├── analyze_structure.py  — передача pages/toc в анализатор, простановка title/book_id
-│   ├── extract_scan_images.py — скачивание обложки + select_photo_pages + ScanExtractor/ImageProcessor
+│   ├── extract_scan_images.py — select_photo_pages + ScanExtractor/ImageProcessor (best-effort по сбойным сканам)
 │   ├── build_epub.py         — передача StructuredDocument в epub_builder
 │   ├── convert_to_azw3.py    — вызов converter с логированием
-│   └── run_pipeline.py       — сквозной: fetch→analyze→[scans]→epub→[azw3], PipelineResult
+│   └── run_pipeline.py       — сквозной: fetch→analyze→[scans]→epub→[azw3], PipelineResult.
+│                               Обложка (is_cover) качается и проходит тот же ImageProcessor,
+│                               что и сканы; fetch и обработка best-effort — сбой не рвёт пайплайн.
 ├── services/
 │   ├── __init__.py          — только Protocol-интерфейсы (DI-контракты)
 │   ├── fetcher.py           — httpx.Client + tenacity (retry только transient: 408/429/5xx)
