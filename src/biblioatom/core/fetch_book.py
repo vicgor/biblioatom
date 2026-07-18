@@ -1,17 +1,15 @@
 """Use case: загрузка книги (метаданные + страницы) через сервисный слой.
 
-Перенос оркестрации legacy ``download_book`` (``fetch.py``) в чистый use case.
-Зависимости (fetcher/parser) внедряются через Protocol-интерфейсы
-(Dependency Inversion) — use case их не создаёт сам и не зависит от конкретных
-реализаций httpx/selectolax.
+Оркестрирует загрузку как чистый use case. Зависимости (fetcher/parser)
+внедряются через Protocol-интерфейсы (Dependency Inversion) — use case их не
+создаёт сам и не зависит от конкретных реализаций httpx/selectolax.
 
-Исправления багов ревью:
+Особенности:
 
-* добавлена валидация диапазона страниц ``from_page``/``to_page`` — при
-  нарушении поднимается :class:`InputValidationError` вместо молчаливого пустого
+* диапазон страниц ``from_page``/``to_page`` валидируется — при нарушении
+  поднимается :class:`InputValidationError` вместо молчаливого пустого
   результата;
-* прогресс логируется через structlog (Rich-прогресс появится в CLI на Этапе 6),
-  без CLI-зависимостей в use case.
+* прогресс логируется через structlog, без CLI-зависимостей в use case.
 """
 
 from __future__ import annotations

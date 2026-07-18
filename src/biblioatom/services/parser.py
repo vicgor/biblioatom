@@ -1,7 +1,7 @@
 """Разбор HTML/JSON источника в доменные модели на selectolax.
 
-Перенос доменной логики парсинга из legacy ``fetch.py`` с заменой ``HTMLParser``/regex на
-selectolax. Сохранены доменные знания о структуре книги и оглавления.
+Инкапсулирует доменные знания о структуре книги и оглавления; парсинг HTML
+идёт через selectolax (без ``HTMLParser``/regex).
 
 Для нормализации идентификатора источника используйте
 :func:`~biblioatom.services.source_utils.book_id_from_source` из

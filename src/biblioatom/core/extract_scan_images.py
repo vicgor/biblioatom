@@ -3,8 +3,7 @@
 Содержит две части:
 
 * :func:`select_photo_pages` — чистая доменная логика отбора страниц с
-  иллюстрациями (перенос из legacy ``cli._download_images``), типизированная на
-  :class:`~biblioatom.models.PageModel`;
+  иллюстрациями, типизированная на :class:`~biblioatom.models.PageModel`;
 * :func:`extract_scan_images` — оркестрация: для каждого скана вызывается
   ``ScanExtractorProtocol`` (поиск кропов) и ``ImageProcessorProtocol``
   (постобработка/сохранение). Зависимости внедряются через Protocol-интерфейсы
