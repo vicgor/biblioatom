@@ -8,14 +8,30 @@
 
 from __future__ import annotations
 
+import io
+import logging
+import tempfile
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import httpx
 import pytest
+import structlog
 
 from biblioatom.config import AppSettings, HttpSettings
 from biblioatom.errors import FetchError, HttpTimeoutError, ResourceNotFoundError
 from biblioatom.services.fetcher import Fetcher
+
+
+def _configure_structlog_level(level: int) -> None:
+    """Настроить structlog на конкретный filtering-уровень (вывод в StringIO)."""
+
+    structlog.configure(
+        processors=[structlog.dev.ConsoleRenderer()],
+        logger_factory=structlog.PrintLoggerFactory(file=io.StringIO()),
+        wrapper_class=structlog.make_filtering_bound_logger(level),
+        cache_logger_on_first_use=False,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -195,3 +211,48 @@ class TestFetchMetaTocImage:
             pytest.raises(ResourceNotFoundError),
         ):
             fetcher.fetch_image("book", 9)
+
+
+class TestDumpHtmlIfDebug:
+    """Отладочный дамп управляется уровнем structlog, а не stdlib logging."""
+
+    @staticmethod
+    def _handler(_req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200)
+
+    def test_dumps_when_structlog_at_debug(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """structlog=DEBUG → дамп создаётся, даже если stdlib-логгер выше DEBUG."""
+
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        _configure_structlog_level(logging.DEBUG)
+        # Расхождение: stdlib-логгер модуля выше DEBUG — старый гейт дал бы False.
+        stdlib_logger = logging.getLogger("biblioatom.services.fetcher")
+        original = stdlib_logger.level
+        stdlib_logger.setLevel(logging.WARNING)
+        try:
+            response = httpx.Response(
+                200, text="<html>тело</html>", headers={"content-type": "text/html"}
+            )
+            with _make_fetcher(self._handler) as fetcher:
+                fetcher._dump_html_if_debug("https://example.test/book/1", response)
+        finally:
+            stdlib_logger.setLevel(original)
+
+        dumps = list(tmp_path.glob("biblioatom_*.html"))
+        assert len(dumps) == 1
+        assert "тело" in dumps[0].read_text(encoding="utf-8")
+
+    def test_skipped_when_structlog_below_debug(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """structlog=INFO → дамп не создаётся."""
+
+        monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+        _configure_structlog_level(logging.INFO)
+        response = httpx.Response(200, text="x", headers={"content-type": "text/html"})
+        with _make_fetcher(self._handler) as fetcher:
+            fetcher._dump_html_if_debug("https://example.test/book/2", response)
+
+        assert list(tmp_path.glob("biblioatom_*")) == []
