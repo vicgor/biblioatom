@@ -231,10 +231,11 @@ src/biblioatom/
 ├── core/              — use cases: оркестрация без I/O-деталей
 │   ├── fetch_book.py         — загрузка метаданных, TOC и страниц (best-effort)
 │   ├── analyze_structure.py  — передача страниц/TOC в анализатор, простановка мета
-│   ├── extract_scan_images.py — скачивание обложки + отбор фото-страниц + кроп/постобработка
+│   ├── extract_scan_images.py — отбор фото-страниц + кроп/постобработка сканов
 │   ├── build_epub.py         — передача документа в epub_builder, возврат BuildResult
 │   ├── convert_to_azw3.py    — вызов converter, возврат BuildResult
-│   └── run_pipeline.py       — сквозной пайплайн: fetch → analyze → [scans] → epub → [azw3]
+│   └── run_pipeline.py       — сквозной пайплайн: fetch → analyze → [scans] → epub → [azw3];
+│                               обложка качается и проходит ImageProcessor (best-effort)
 ├── services/          — реализации, внедряемые через typing.Protocol
 │   ├── __init__.py          — Protocol-интерфейсы (FetcherProtocol, ParserProtocol, …)
 │   ├── fetcher.py           — httpx + tenacity
