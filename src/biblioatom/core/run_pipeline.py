@@ -31,7 +31,7 @@ from biblioatom.core.extract_scan_images import (
 from biblioatom.core.fetch_book import FetchedBook, fetch_book
 from biblioatom.errors import FetchError, ImageProcessingError, InputValidationError
 from biblioatom.logging_config import get_logger, set_correlation_id
-from biblioatom.models import ImageAsset
+from biblioatom.models import BoundingBox, ExtractedImage, ImageAsset
 from biblioatom.services import (
     ConverterProtocol,
     EpubBuilderProtocol,
@@ -94,22 +94,35 @@ def _extract_images(
     for cover in cover_pages[:1]:
         try:
             data = fetcher.fetch_image(book.book_id, cover.page)
-            raw_path = images_dir / f"{cover.page:04d}_cover.jpg"
-            raw_path.write_bytes(data)
-            asset = ImageAsset(page=cover.page, path=raw_path)
-            cover_assets.append(asset)
-            _logger.info("run_pipeline.cover_fetched", cdn_page=cover.page)
         except FetchError as exc:
             _logger.warning(
                 "run_pipeline.cover_fetch_failed",
                 cdn_page=cover.page,
                 error=str(exc),
             )
-        except OSError as exc:
-            raise ImageProcessingError(
-                "Failed to write cover image to disk.",
-                context={"path": str(images_dir)},
-            ) from exc
+            continue
+        # Обложка проходит тот же ImageProcessor, что и остальные сканы
+        # (ресайз/нормализация из ImageSettings). Поле box обязательно моделью,
+        # но process() его не использует — ставим заглушку 1×1 (core-слой не
+        # тянет Pillow и не может декодировать реальные размеры обложки).
+        crop = ExtractedImage(
+            page=cover.page,
+            data=data,
+            box=BoundingBox(x=0, y=0, width=1, height=1),
+        )
+        out_path = images_dir / f"{cover.page:04d}_cover"
+        try:
+            asset = image_processor.process(crop, out_path)
+        except ImageProcessingError as exc:
+            # Best-effort: сбой обработки обложки не рвёт пайплайн.
+            _logger.warning(
+                "run_pipeline.cover_process_failed",
+                cdn_page=cover.page,
+                error=str(exc),
+            )
+            continue
+        cover_assets.append(asset)
+        _logger.info("run_pipeline.cover_fetched", cdn_page=cover.page)
 
     photo_pages = select_photo_pages(book.pages)
     _logger.info("run_pipeline.scan_pages_selected", count=len(photo_pages))
