@@ -21,6 +21,8 @@ uv run biblioatom analyze kapitsa_1994          # скачать и показа
 uv run biblioatom analyze book.json             # без сети — из локального JSON
 uv run biblioatom analyze book.json --json      # вывод в JSON
 uv run biblioatom pipeline kapitsa_1994 --images --azw3 -o book.epub
+uv run biblioatom export-ris book.json -o refs.ris   # оглавление книги → RIS
+uv run biblioatom import-ris refs.ris -o refs.json   # RIS → JSON
 
 # Качество кода
 uv run ruff check
@@ -165,7 +167,7 @@ tests/
 ├── test_errors.py               — иерархия ошибок, exit_code_for, подтипы
 ├── test_extract_scan_images.py  — core use case extract_scan_images
 ├── test_fetch_book.py           — core use case fetch_book (мок fetcher)
-├── test_fetcher.py              — Fetcher (respx HTTP-мок)
+├── test_fetcher.py              — Fetcher (httpx.MockTransport)
 ├── test_html_cleaner.py         — normalize_text, clean_pagehtml
 ├── test_image_processor.py      — ImageProcessor (Pillow)
 ├── test_logging_config.py       — setup_logging, correlation_id, redact
@@ -173,6 +175,7 @@ tests/
 ├── test_parser.py               — Parser (selectolax): TOC, meta, content
 ├── test_pipeline_integration.py — E2E без сети: FakeFetcher + реальные сервисы
 ├── test_ris_parser.py           — parse_ris, entry_to_ris, toc_to_ris
+├── test_run_pipeline.py         — core use case run_pipeline (обложка через ImageProcessor)
 ├── test_scan_extractor.py       — ScanExtractor: синтетические сканы + fallback-методы
 └── test_structure_analyzer.py   — split_by_toc, split_into_chapters, эвристики
 ```
@@ -193,4 +196,3 @@ Integration-тест использует `_FakeFetcher` (реализует `Fe
 ## Известные технические долги
 
 - `ElementKind.LIST = "list_"` — сериализованное значение отличается от имени члена; при необходимости совместимости с внешними форматами учитывать при десериализации.
-- `get_logger()` возвращает `Any` — временный компромисс для совместимости с API structlog.
