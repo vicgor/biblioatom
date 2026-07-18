@@ -179,12 +179,17 @@ class Fetcher:
         для корректной работы на Windows и в окружениях с нестандартным TMPDIR.
         Вызов безопасен при любом уровне логирования — тело метода не выполняется
         если DEBUG не активен.
+
+        Уровень проверяется через сам structlog (``is_enabled_for``), а не через
+        stdlib ``logging``: конфигурация уровня задаётся ``setup_logging`` на
+        structlog, и stdlib-уровень модуля может с ней расходиться.
         """
-        if not logging.getLogger(__name__).isEnabledFor(logging.DEBUG):
+        if not _logger.is_enabled_for(logging.DEBUG):
             return
         content_type = response.headers.get("content-type", "")
         ext = self._dump_ext(content_type)
-        slug = hashlib.md5(url.encode()).hexdigest()[:12]
+        # md5 здесь не для безопасности — только slug для имени файла дампа.
+        slug = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()[:12]
         path = Path(tempfile.gettempdir()) / f"biblioatom_{slug}{ext}"
         try:
             path.write_text(response.text, encoding="utf-8")
