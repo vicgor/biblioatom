@@ -95,9 +95,10 @@ class ScanExtractionSettings(BaseModel):
     )
     margin_px: int = Field(
         default=50,
-        ge=0,
+        ge=1,
         description=(
             "Ширина полей страницы для оценки уровня белого и исключения колонтитулов (пикселей)."
+            " Должна быть ≥ 1: при 0 срез gray[:, -0:] вернул бы всю страницу, а не поле."
         ),
     )
     white_percentile: float = Field(
