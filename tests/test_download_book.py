@@ -46,16 +46,16 @@ class _FakeNetwork:
 
 
 class _SpyProgress:
-    """Шпион ProgressReporterProtocol: копит события (kind, phase, total)."""
+    """Шпион ProgressReporterProtocol: копит события (kind, phase, total|skipped)."""
 
     def __init__(self) -> None:
-        self.events: list[tuple[str, str, int | None]] = []
+        self.events: list[tuple[str, str, int | bool | None]] = []
 
     def start(self, phase: str, total: int) -> None:
         self.events.append(("start", phase, total))
 
-    def advance(self, phase: str) -> None:
-        self.events.append(("advance", phase, None))
+    def advance(self, phase: str, *, skipped: bool = False) -> None:
+        self.events.append(("advance", phase, skipped))
 
     def finish(self, phase: str) -> None:
         self.events.append(("finish", phase, None))
@@ -147,10 +147,10 @@ def test_progress_reports_pages_then_scans(tmp_path: Path) -> None:
     starts = [e for e in spy.events if e[0] == "start"]
     assert starts == [("start", "pages", 3), ("start", "scans", 2)]
     assert [e for e in spy.events if e[0] == "advance" and e[1] == "pages"] == [
-        ("advance", "pages", None)
+        ("advance", "pages", False)
     ] * 3
     assert [e for e in spy.events if e[0] == "advance" and e[1] == "scans"] == [
-        ("advance", "scans", None)
+        ("advance", "scans", False)
     ] * 2
     finishes = [e for e in spy.events if e[0] == "finish"]
     assert finishes == [("finish", "pages", None), ("finish", "scans", None)]
@@ -164,5 +164,19 @@ def test_progress_advances_on_cached_skips(tmp_path: Path) -> None:
     _, _, result = _run(tmp_path, progress=spy)
 
     assert result.pages_skipped == 3
-    assert len([e for e in spy.events if e[0] == "advance" and e[1] == "pages"]) == 3
-    assert len([e for e in spy.events if e[0] == "advance" and e[1] == "scans"]) == 2
+    pages_advances = [e for e in spy.events if e[0] == "advance" and e[1] == "pages"]
+    assert pages_advances == [("advance", "pages", True)] * 3  # всё из кэша
+    scans_advances = [e for e in spy.events if e[0] == "advance" and e[1] == "scans"]
+    assert scans_advances == [("advance", "scans", True)] * 2
+
+
+def test_progress_marks_only_cached_items_skipped(tmp_path: Path) -> None:
+    """Частичный кэш: пропуски помечены skipped=True, скачанные — False."""
+
+    net, ws, _ = _run(tmp_path)  # полный кэш
+    ws.page_path(1).unlink()  # страница 1 будет скачана заново
+    spy = _SpyProgress()
+    _run(tmp_path, progress=spy)
+
+    pages_advances = [e[2] for e in spy.events if e[0] == "advance" and e[1] == "pages"]
+    assert pages_advances == [True, False, True]  # p0 кэш, p1 скачана, p2 кэш

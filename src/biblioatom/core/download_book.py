@@ -96,6 +96,8 @@ def download_book(
     :param delay_ms: пауза между сетевыми запросами, мс.
     :param refresh: перекачать заново даже при наличии файлов в кэше.
     :param progress: приёмник прогресса фаз "pages" и "scans"; None — тишина.
+        Каждый шаг помечает пропуски из кэша (``advance(..., skipped=True)``)
+        отдельно от реально скачанных элементов.
     :raises InputValidationError: при некорректном диапазоне страниц.
     :raises WorkspaceError: при сбое записи в рабочий каталог.
     """
@@ -124,10 +126,12 @@ def download_book(
     if progress is not None:
         progress.start("pages", resolved_to - from_page + 1)
     for page in range(from_page, resolved_to + 1):
+        was_skipped = False
         try:
             path = workspace.page_path(page)
             if path.is_file() and not refresh:
                 result.pages_skipped += 1
+                was_skipped = True
                 continue
             try:
                 raw = network.fetch_page_raw(book_id, page)
@@ -142,7 +146,7 @@ def download_book(
                 time.sleep(delay_ms / 1000.0)
         finally:
             if progress is not None:
-                progress.advance("pages")
+                progress.advance("pages", skipped=was_skipped)
     if progress is not None:
         progress.finish("pages")
 
@@ -160,10 +164,12 @@ def download_book(
     if progress is not None:
         progress.start("scans", len(cdn_pages))
     for cdn in cdn_pages:
+        was_skipped = False
         try:
             scan = workspace.scan_path(cdn)
             if scan.is_file() and not refresh:
                 result.scans_skipped += 1
+                was_skipped = True
                 continue
             try:
                 data = network.fetch_image(book_id, cdn)
@@ -177,7 +183,7 @@ def download_book(
                 time.sleep(delay_ms / 1000.0)
         finally:
             if progress is not None:
-                progress.advance("scans")
+                progress.advance("scans", skipped=was_skipped)
     if progress is not None:
         progress.finish("scans")
 

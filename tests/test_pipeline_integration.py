@@ -68,7 +68,7 @@ class _SpyProgress:
     def start(self, phase: str, total: int) -> None:
         self.events.append(("start", phase, total))
 
-    def advance(self, phase: str) -> None:
+    def advance(self, phase: str, *, skipped: bool = False) -> None:
         self.events.append(("advance", phase, None))
 
     def finish(self, phase: str) -> None:
