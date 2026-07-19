@@ -178,6 +178,8 @@ uv run biblioatom pipeline kapitsa_1994 --work-dir /data/books --from-page 0 --t
 | `-q, --quiet` | Минимальный вывод (только ошибки) |
 | `-c, --config PATH` | Путь к `.env`-файлу с настройками |
 
+Без флагов долгие операции показывают прогресс-бар (stderr); с `-v`/`-vv` вместо бара выводятся логи; `--quiet` и не-TTY отключают и то и другое.
+
 ## Коды завершения
 
 | Код | Категория |
@@ -300,7 +302,8 @@ src/biblioatom/
 │   ├── scan_extractor.py    — OpenCV: Otsu/Canny + адаптивный fallback → crop
 │   ├── image_processor.py   — Pillow: ресайз, нормализация режима, сохранение
 │   ├── epub_builder.py      — EbookLib: EPUB 3, обложка, nav, figcaption, якоря сносок
-│   └── converter.py         — subprocess ebook-convert (без shell=True)
+│   ├── converter.py         — subprocess ebook-convert (без shell=True)
+│   └── progress.py          — RichProgressReporter: прогресс-бары на stderr
 └── tools/             — утилиты разработчика
     └── tune_scan.py   — подбор параметров OpenCV (grid-search / Optuna)
 ```
@@ -338,6 +341,7 @@ build_epub  →  BuildResult(outputs=[book.epub])
 | `ConverterProtocol` | `EbookConvertConverter` | `convert_to_azw3`, `run_pipeline` |
 | `ScanExtractorProtocol` | `ScanExtractor` (OpenCV) | `extract_scan_images`, `run_pipeline` |
 | `ImageProcessorProtocol` | `ImageProcessor` (Pillow) | `extract_scan_images`, `run_pipeline` |
+| `ProgressReporterProtocol` | `RichProgressReporter` | `fetch_book`, `download_book`, `extract_scan_images`, `run_pipeline` |
 
 ## Как расширять
 
