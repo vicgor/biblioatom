@@ -18,6 +18,7 @@ from biblioatom.errors import (
     InputValidationError,
 )
 from biblioatom.services.source_utils import book_id_from_source
+from biblioatom.services.workspace import BookWorkspace
 
 runner = CliRunner()
 
@@ -80,6 +81,68 @@ class TestFetchCommand:
     def test_fetch_bad_source(self) -> None:
         result = runner.invoke(app, ["fetch", "https://example.com/no-book"])
         assert result.exit_code == int(ExitCode.INPUT_VALIDATION)
+
+
+class TestDownloadCommand:
+    def test_download_invokes_use_case(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from biblioatom.core.download_book import DownloadResult
+
+        captured: dict[str, object] = {}
+
+        def fake_download(network, local, parser, workspace, book_id, **kwargs):  # type: ignore[no-untyped-def]
+            captured["book_id"] = book_id
+            captured["root"] = workspace.root
+            captured["refresh"] = kwargs.get("refresh")
+            return DownloadResult(
+                book_id=book_id,
+                title="Книга",
+                max_page=2,
+                pages_downloaded=3,
+                scans_downloaded=1,
+            )
+
+        monkeypatch.setattr("biblioatom.core.download_book.download_book", fake_download)
+        result = runner.invoke(app, ["download", "bid", "--work-dir", str(tmp_path), "--refresh"])
+        assert result.exit_code == 0
+        assert captured["book_id"] == "bid"
+        assert captured["root"] == tmp_path / "bid"
+        assert captured["refresh"] is True
+        assert "3" in result.output  # счётчик страниц в выводе
+
+
+class TestCleanCommand:
+    def _make_workspace(self, tmp_path: Path) -> BookWorkspace:
+        ws = BookWorkspace(work_dir=tmp_path, book_id="bid")
+        ws.ensure_dirs()
+        ws.meta_path.write_text("<html/>", encoding="utf-8")
+        ws.scan_path(0).write_bytes(b"\xff\xd8" * 10)
+        ws.epub_path.write_bytes(b"PK")
+        return ws
+
+    def test_clean_default_removes_scans(self, tmp_path: Path) -> None:
+        ws = self._make_workspace(tmp_path)
+        result = runner.invoke(app, ["clean", "bid", "--work-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert not ws.scans_dir.exists()
+        assert ws.meta_path.is_file()
+
+    def test_clean_all_keeps_epub(self, tmp_path: Path) -> None:
+        ws = self._make_workspace(tmp_path)
+        result = runner.invoke(app, ["clean", "bid", "--work-dir", str(tmp_path), "--all"])
+        assert result.exit_code == 0
+        assert not ws.raw_dir.exists()
+        assert ws.epub_path.is_file()
+
+    def test_clean_raw_and_all_conflict(self, tmp_path: Path) -> None:
+        self._make_workspace(tmp_path)
+        result = runner.invoke(app, ["clean", "bid", "--work-dir", str(tmp_path), "--raw", "--all"])
+        assert result.exit_code == 3
+
+    def test_clean_missing_workspace_exit_3(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["clean", "nope", "--work-dir", str(tmp_path)])
+        assert result.exit_code == 3
 
 
 class TestErrorMapping:

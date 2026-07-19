@@ -35,10 +35,12 @@ from biblioatom.services.converter import EbookConvertConverter
 from biblioatom.services.epub_builder import EpubBuilder
 from biblioatom.services.fetcher import Fetcher
 from biblioatom.services.image_processor import ImageProcessor
+from biblioatom.services.local_fetcher import LocalFetcher
 from biblioatom.services.parser import Parser
 from biblioatom.services.scan_extractor import ScanExtractor
 from biblioatom.services.source_utils import book_id_from_source
 from biblioatom.services.structure_analyzer import StructureAnalyzer
+from biblioatom.services.workspace import BookWorkspace
 from biblioatom.ui import console, err_console
 
 if TYPE_CHECKING:
@@ -160,6 +162,11 @@ def _build_fetcher(settings: Settings) -> tuple[Fetcher, Parser]:
     return fetcher, parser
 
 
+def _workspace_for(settings: Settings, book_id: str, work_dir: Path | None) -> BookWorkspace:
+    """Собрать BookWorkspace: --work-dir переопределяет settings.app.work_dir."""
+    return BookWorkspace(work_dir=work_dir or settings.app.work_dir, book_id=book_id)
+
+
 def _version_callback(value: bool) -> None:
     """Вывести версию и выйти."""
     if value:
@@ -258,6 +265,101 @@ def fetch(
         console.print(
             f"[green]✓[/green] Скачано {len(book.pages)} стр. "
             f"(ошибок: {len(book.failed_pages)}) → {output}"
+        )
+
+
+@app.command()
+def download(
+    ctx: typer.Context,
+    source: Annotated[str, typer.Argument(help="Идентификатор книги или URL.")],
+    from_page: Annotated[
+        int,
+        typer.Option("--from-page", help="Первая страница (0-based)."),
+    ] = 0,
+    to_page: Annotated[
+        int | None,
+        typer.Option("--to-page", help="Последняя страница (по умолчанию — авто)."),
+    ] = None,
+    refresh: Annotated[
+        bool,
+        typer.Option("--refresh", help="Перекачать заново, игнорируя кэш."),
+    ] = False,
+    work_dir: Annotated[
+        Path | None,
+        typer.Option("--work-dir", help="Корень рабочих каталогов (default: books)."),
+    ] = None,
+) -> None:
+    """Скачать сырьё книги в рабочий каталог (books/<book_id>/raw/) + book.json."""
+    settings: Settings = ctx.obj[_CONFIG]
+    verbose: bool = ctx.obj[_VERBOSE]
+    with _handle_errors(verbose=verbose):
+        from biblioatom.core.download_book import download_book
+
+        book_id = book_id_from_source(source)
+        workspace = _workspace_for(settings, book_id, work_dir)
+        fetcher, parser = _build_fetcher(settings)
+        local = LocalFetcher(workspace, parser=parser)
+        try:
+            result = download_book(
+                fetcher,
+                local,
+                parser,
+                workspace,
+                book_id,
+                from_page=from_page,
+                to_page=to_page,
+                delay_ms=settings.http.delay_ms,
+                refresh=refresh,
+            )
+        finally:
+            fetcher.close()
+
+        console.print(
+            f"[green]✓[/green] [bold]{result.title}[/bold] — "
+            f"страниц скачано: {result.pages_downloaded}, пропущено: {result.pages_skipped}, "
+            f"сканов: {result.scans_downloaded} "
+            f"(ошибок: {len(result.failed_pages) + len(result.failed_scans)})"
+        )
+        console.print(f"  Каталог → {workspace.root}")
+
+
+@app.command()
+def clean(
+    ctx: typer.Context,
+    source: Annotated[str, typer.Argument(help="Идентификатор книги или URL.")],
+    raw: Annotated[
+        bool,
+        typer.Option("--raw", help="Удалить весь raw/ (сырьё целиком)."),
+    ] = False,
+    all_: Annotated[
+        bool,
+        typer.Option("--all", help="Удалить всё, кроме итогового .epub."),
+    ] = False,
+    work_dir: Annotated[
+        Path | None,
+        typer.Option("--work-dir", help="Корень рабочих каталогов (default: books)."),
+    ] = None,
+) -> None:
+    """Очистить кэш книги (по умолчанию — только сырые сканы raw/scans/)."""
+    settings: Settings = ctx.obj[_CONFIG]
+    verbose: bool = ctx.obj[_VERBOSE]
+    with _handle_errors(verbose=verbose):
+        from biblioatom.core.clean_workspace import CleanScope, clean_workspace
+
+        if raw and all_:
+            raise InputValidationError(
+                "Options --raw and --all are mutually exclusive.",
+                context={"raw": raw, "all": all_},
+            )
+        scope = CleanScope.ALL if all_ else CleanScope.RAW if raw else CleanScope.SCANS
+        book_id = book_id_from_source(source)
+        workspace = _workspace_for(settings, book_id, work_dir)
+        result = clean_workspace(workspace, scope)
+
+        freed_mb = result.freed_bytes / (1024 * 1024)
+        console.print(
+            f"[green]✓[/green] Удалено объектов: {len(result.removed)}, "
+            f"освобождено: {freed_mb:.1f} МБ ({scope})"
         )
 
 
