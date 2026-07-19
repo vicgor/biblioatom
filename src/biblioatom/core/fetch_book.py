@@ -42,7 +42,23 @@ class FetchedBook:
     failed_pages: list[int] = field(default_factory=list)
 
 
-def _validate_page_range(from_page: int, to_page: int, max_page: int) -> None:
+def book_payload(book: FetchedBook) -> dict[str, object]:
+    """JSON-сериализуемое представление книги (формат ``book.json``).
+
+    Единый формат для команды ``fetch`` и use case ``download_book`` —
+    читается обратно ``_load_book_from_json`` (CLI ``analyze``/``build``).
+    """
+
+    return {
+        "title": book.title,
+        "book_id": book.book_id,
+        "max_page": book.max_page,
+        "toc": [entry.model_dump() for entry in book.toc],
+        "pages": [page.model_dump() for page in book.pages],
+    }
+
+
+def validate_page_range(from_page: int, to_page: int, max_page: int) -> None:
     """Проверить корректность диапазона страниц.
 
     Требования: ``from_page >= 0`` (физический индекс 0-based), ``to_page >=
@@ -92,7 +108,7 @@ def fetch_book(
     if to_page is None:
         to_page = max_page
 
-    _validate_page_range(from_page, to_page, max_page)
+    validate_page_range(from_page, to_page, max_page)
 
     # M3: число страниц получено через fallback (HTML не содержал data-rel).
     # Предел «выдуман» и неотличим от настоящего на уровне валидации, поэтому
@@ -179,4 +195,4 @@ def fetch_book(
     )
 
 
-__all__ = ["FetchedBook", "fetch_book"]
+__all__ = ["FetchedBook", "book_payload", "fetch_book", "validate_page_range"]

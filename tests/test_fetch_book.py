@@ -11,7 +11,7 @@ import pytest
 from structlog.testing import capture_logs
 
 from biblioatom.config import ParsingSettings
-from biblioatom.core.fetch_book import fetch_book
+from biblioatom.core.fetch_book import FetchedBook, fetch_book
 from biblioatom.errors import FetchError, InputValidationError, ParseError
 from biblioatom.models import BookMeta, EmbeddedContent, TocEntry
 from biblioatom.services.parser import Parser
@@ -140,3 +140,23 @@ class TestPageErrorHandling:
         fetcher = _FakeFetcher(max_page=3, fail_pages={1}, fail_exc=AttributeError("bug"))
         with pytest.raises(AttributeError):
             fetch_book(fetcher, _parser(), "book", from_page=0, to_page=2)
+
+
+def test_book_payload_matches_fetch_json_format() -> None:
+    from biblioatom.core.fetch_book import book_payload
+    from biblioatom.models import EmbeddedContent, PageModel, TocEntry
+
+    book = FetchedBook(
+        book_id="bid",
+        title="Книга",
+        max_page=1,
+        toc=[TocEntry(title="Глава", page=1)],
+        pages=[PageModel(page=0, content=EmbeddedContent())],
+    )
+    payload = book_payload(book)
+    assert payload["title"] == "Книга"
+    assert payload["book_id"] == "bid"
+    assert payload["max_page"] == 1
+    # Round-trip: сериализованные страницы валидируются обратно в модели.
+    assert PageModel.model_validate(payload["pages"][0]).page == 0  # type: ignore[index]
+    assert TocEntry.model_validate(payload["toc"][0]).title == "Глава"  # type: ignore[index]

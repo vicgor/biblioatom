@@ -236,7 +236,7 @@ def fetch(
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
-        from biblioatom.core.fetch_book import fetch_book
+        from biblioatom.core.fetch_book import book_payload, fetch_book
 
         book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
@@ -252,13 +252,7 @@ def fetch(
         finally:
             fetcher.close()
 
-        payload = {
-            "title": book.title,
-            "book_id": book.book_id,
-            "max_page": book.max_page,
-            "toc": [entry.model_dump() for entry in book.toc],
-            "pages": [page.model_dump() for page in book.pages],
-        }
+        payload = book_payload(book)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         console.print(
