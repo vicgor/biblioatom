@@ -108,7 +108,7 @@ src/biblioatom/
 
 ```
 CLI (cli.py)
-  └─ [download_book(network_fetcher, local_fetcher, parser, workspace, book_id)]  →  DownloadResult
+  └─ [download_book(network, local, parser, workspace, book_id)]  →  DownloadResult
        └─ fetch_book(fetcher, parser, book_id)  →  FetchedBook   # fetcher = LocalFetcher(workspace)
             └─ analyze_structure(analyzer, pages, toc)  →  StructuredDocument
                  ├─ [extract_scan_images(scan_extractor, image_processor, scans, dir)]  →  ScanExtractionResult
@@ -217,7 +217,7 @@ tests/
 ├── test_logging_config.py       — setup_logging, correlation_id, redact
 ├── test_models.py               — Pydantic-модели и валидация
 ├── test_parser.py               — Parser (selectolax): TOC, meta, content
-├── test_pipeline_integration.py — E2E без сети: FakeRawFetcher (RawFetcherProtocol) авто-качает
+├── test_pipeline_integration.py — E2E без сети: _FakeNetworkFetcher (RawFetcherProtocol) авто-качает
 │                                   в workspace при первом прогоне, дальнейшая сборка — оффлайн
 │                                   через LocalFetcher + реальные сервисы
 ├── test_progress.py             — RichProgressReporter (StringIO-консоль)
@@ -245,4 +245,4 @@ Integration-тест использует `_FakeNetworkFetcher` (реализу�
 
 ## Известные технические долги
 
-- `ElementKind.LIST = "list_"` — сериализованное значение отличается от имени члена; при необходимости совместимости с внешними форматами учитывать при десериализации.
+- `ElementKind.LIST_ = "list"` — имя члена с trailing underscore (чтобы не конфликтовать с builtin `list`), сериализованное значение — без; при необходимости совместимости с внешними форматами учитывать при десериализации.
