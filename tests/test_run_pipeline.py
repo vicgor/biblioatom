@@ -11,6 +11,7 @@ from pathlib import Path
 from biblioatom.core.fetch_book import FetchedBook
 from biblioatom.core.run_pipeline import _extract_images
 from biblioatom.models import EmbeddedContent, ExtractedImage, ImageAsset, PageModel
+from biblioatom.services.workspace import BookWorkspace
 
 # --- фейковые реализации Protocol -----------------------------------------
 
@@ -64,10 +65,9 @@ def test_cover_is_processed_through_image_processor(tmp_path: Path) -> None:
 
     fetcher = _CoverFetcher(b"rawcover")
     processor = _SpyProcessor()
+    ws = BookWorkspace(work_dir=tmp_path, book_id="bid")
 
-    result = _extract_images(
-        fetcher, _NoopExtractor(), processor, _cover_book(), tmp_path / "images"
-    )
+    result = _extract_images(fetcher, _NoopExtractor(), processor, _cover_book(), ws)
 
     # Обложка передана в процессор с исходными байтами.
     assert [img.page for img in processor.processed] == [0]
@@ -77,3 +77,37 @@ def test_cover_is_processed_through_image_processor(tmp_path: Path) -> None:
     assert result.images[0].page == 0
     assert result.images[0].width == 1200
     assert result.images[0].height == 1800
+    # Сырые копии обложки в images/ больше не создаются.
+    assert list(ws.images_dir.glob("*_raw.jpg")) == []
+
+
+def test_scans_are_read_from_workspace_not_duplicated(tmp_path: Path) -> None:
+    """Сырые сканы берутся из raw/scans/ — _raw.jpg в images/ больше не пишутся."""
+
+    ws = BookWorkspace(work_dir=tmp_path, book_id="bid")
+    ws.ensure_dirs()
+    ws.scan_path(5).write_bytes(b"\x89PNGscan")
+
+    class _OneCropExtractor:
+        def extract(self, image: bytes, page: int) -> list[ExtractedImage]:
+            from biblioatom.models import BoundingBox
+
+            return [
+                ExtractedImage(page=page, data=image, box=BoundingBox(x=0, y=0, width=1, height=1))
+            ]
+
+    from biblioatom.models import BookElement, ElementKind
+
+    photo = PageModel(
+        page=5,
+        content=EmbeddedContent(),
+        elements=[BookElement(kind=ElementKind.CAPTION, text="Рис. 1", page=5)],
+    )
+    book = FetchedBook(book_id="bid", title="Книга", max_page=5, pages=[photo])
+    processor = _SpyProcessor()
+
+    result = _extract_images(_CoverFetcher(b""), _OneCropExtractor(), processor, book, ws)
+
+    assert [img.page for img in result.images] == [5]
+    assert processor.processed[0].data == b"\x89PNGscan"
+    assert list(ws.images_dir.glob("*_raw.jpg")) == []

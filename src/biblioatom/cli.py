@@ -480,7 +480,10 @@ def pipeline(
         book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
         try:
-            result = run_pipeline(
+            # TODO(task-10): команда переводится на BookWorkspace/LocalFetcher/
+            # network_fetcher — вызов ниже временно использует старый набор
+            # аргументов и требует type: ignore до полного переписывания.
+            result = run_pipeline(  # type: ignore[call-arg]
                 fetcher=fetcher,
                 parser=parser,
                 analyzer=StructureAnalyzer(chapter_mode.value),

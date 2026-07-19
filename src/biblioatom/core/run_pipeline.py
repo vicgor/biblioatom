@@ -2,11 +2,21 @@
 
 Оркестрирует существующие core use cases в единый сквозной сценарий:
 
-    fetch_book → analyze_structure → [extract_scan_images] → build_epub → [convert_to_azw3]
+    [download_book] → fetch_book → analyze_structure → [extract_scan_images]
+        → build_epub → [convert_to_azw3]
 
 Все зависимости-сервисы внедряются через Protocol-интерфейсы (Dependency
 Inversion) — use case не знает про httpx/selectolax/EbookLib/Calibre и не
 содержит CLI/I/O-деталей (вывод, прогресс-бары и т.п. остаются в слое CLI).
+
+Сборка всегда идёт из рабочего каталога книги (:class:`BookWorkspace`) через
+оффлайн-фетчер (``fetcher``, обычно :class:`~biblioatom.services.local_fetcher.LocalFetcher`).
+Если сырья ещё нет (``workspace.has_raw()`` — false) или запрошен ``refresh``,
+пайплайн сначала авто-скачивает его через ``network_fetcher``
+(:func:`~biblioatom.core.download_book.download_book`); без сети и без кэша —
+:class:`InputValidationError`. Сканы для извлечения иллюстраций читаются
+напрямую из ``workspace.scans_dir`` — промежуточные копии в ``images/`` больше
+не создаются.
 
 Извлечение иллюстраций со сканов и конвертация в AZW3 опциональны: они
 выполняются только если переданы соответствующие зависимости и включены флагами.
@@ -23,6 +33,7 @@ from pathlib import Path
 from biblioatom.core.analyze_structure import analyze_structure
 from biblioatom.core.build_epub import build_epub
 from biblioatom.core.convert_to_azw3 import convert_to_azw3
+from biblioatom.core.download_book import download_book
 from biblioatom.core.extract_scan_images import (
     ScanExtractionResult,
     extract_scan_images,
@@ -38,9 +49,11 @@ from biblioatom.services import (
     FetcherProtocol,
     ImageProcessorProtocol,
     ParserProtocol,
+    RawFetcherProtocol,
     ScanExtractorProtocol,
     StructureAnalyzerProtocol,
 )
+from biblioatom.services.workspace import BookWorkspace
 
 _logger = get_logger(__name__)
 
@@ -70,20 +83,21 @@ def _extract_images(
     scan_extractor: ScanExtractorProtocol,
     image_processor: ImageProcessorProtocol,
     book: FetchedBook,
-    images_dir: Path,
+    workspace: BookWorkspace,
 ) -> ScanExtractionResult:
-    """Скачать сканы фото-страниц и извлечь из них иллюстрации.
+    """Извлечь иллюстрации из закэшированных сканов рабочего каталога.
 
-    Сканы тянутся через ``fetcher.fetch_image`` (best-effort: сбойный лист не
-    рвёт пайплайн), сохраняются во временные файлы внутри ``images_dir`` и
-    передаются в :func:`extract_scan_images`.
+    Сканы читаются напрямую из ``workspace.scans_dir`` (заполняется download) —
+    промежуточные копии ``*_raw.jpg`` больше не создаются. Отсутствующий файл
+    скана попадает в ``failed_scans`` (best-effort, внутри
+    ``extract_scan_images``). Обложка приходит через ``fetcher.fetch_image``
+    (оффлайн-фетчер) и проходит тот же ImageProcessor, что и сканы.
     """
 
+    images_dir = workspace.images_dir
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    scans: list[tuple[int, Path]] = []
     cover_assets: list[ImageAsset] = []
-
     cover_pages = [p for p in book.pages if p.is_cover]
     if len(cover_pages) > 1:
         _logger.warning(
@@ -126,27 +140,7 @@ def _extract_images(
 
     photo_pages = select_photo_pages(book.pages)
     _logger.info("run_pipeline.scan_pages_selected", count=len(photo_pages))
-
-    for photo in photo_pages:
-        try:
-            data = fetcher.fetch_image(book.book_id, photo.cdn_page)
-        except FetchError as exc:
-            _logger.warning(
-                "run_pipeline.scan_fetch_failed",
-                page=photo.page,
-                cdn_page=photo.cdn_page,
-                error=str(exc),
-            )
-            continue
-        raw_path = images_dir / f"{photo.page:04d}_raw.jpg"
-        try:
-            raw_path.write_bytes(data)
-        except OSError as exc:
-            raise ImageProcessingError(
-                "Failed to write scan to disk.",
-                context={"page": photo.page, "path": str(raw_path)},
-            ) from exc
-        scans.append((photo.page, raw_path))
+    scans = [(photo.page, workspace.scan_path(photo.cdn_page)) for photo in photo_pages]
 
     result = extract_scan_images(scan_extractor, image_processor, scans, images_dir)
     result.images = cover_assets + result.images
@@ -159,8 +153,11 @@ def run_pipeline(
     parser: ParserProtocol,
     analyzer: StructureAnalyzerProtocol,
     epub_builder: EpubBuilderProtocol,
+    workspace: BookWorkspace,
     book_id: str,
-    out_path: Path,
+    out_path: Path | None = None,
+    network_fetcher: RawFetcherProtocol | None = None,
+    refresh: bool = False,
     source: str | None = None,
     from_page: int = 0,
     to_page: int | None = None,
@@ -168,36 +165,42 @@ def run_pipeline(
     extract_images: bool = False,
     scan_extractor: ScanExtractorProtocol | None = None,
     image_processor: ImageProcessorProtocol | None = None,
-    images_dir: Path | None = None,
     convert_azw3: bool = False,
     converter: ConverterProtocol | None = None,
     azw3_path: Path | None = None,
 ) -> PipelineResult:
-    """Прогнать полный пайплайн: загрузка → анализ → (сканы) → EPUB → (AZW3).
+    """Прогнать полный пайплайн: [загрузка] → анализ → (сканы) → EPUB → (AZW3).
 
-    :param fetcher: источник данных (:class:`FetcherProtocol`).
+    :param fetcher: оффлайн-источник данных поверх ``workspace``
+        (:class:`FetcherProtocol`, обычно ``LocalFetcher``).
     :param parser: парсер содержимого страниц (:class:`ParserProtocol`).
     :param analyzer: структурный анализатор (:class:`StructureAnalyzerProtocol`).
     :param epub_builder: сборщик EPUB (:class:`EpubBuilderProtocol`).
+    :param workspace: рабочий каталог книги (сырьё/кэш/итоговые файлы).
     :param book_id: идентификатор книги.
-    :param out_path: путь итогового ``.epub``.
+    :param out_path: путь итогового ``.epub``; ``None`` → ``workspace.epub_path``.
+    :param network_fetcher: сетевой источник сырых ответов
+        (:class:`RawFetcherProtocol`); используется только для авто-download,
+        когда в ``workspace`` ещё нет кэша (или запрошен ``refresh``).
+    :param refresh: перекачать сырьё заново, даже если кэш уже есть
+        (требует ``network_fetcher``).
     :param source: источник (URL/идентификатор) для метаданных, опционально.
     :param from_page: первая страница диапазона (0-based, включительно).
     :param to_page: последняя страница (включительно); ``None`` → до ``max_page``.
-    :param delay_ms: пауза между запросами страниц, мс.
+    :param delay_ms: пауза между сетевыми запросами при авто-download, мс.
     :param extract_images: извлекать ли иллюстрации со сканов.
     :param scan_extractor: извлекатель сканов; обязателен при ``extract_images``.
     :param image_processor: постобработчик; обязателен при ``extract_images``.
-    :param images_dir: каталог для скачанных сканов и кропов.
     :param convert_azw3: конвертировать ли EPUB в AZW3 после сборки.
     :param converter: конвертер; обязателен при ``convert_azw3``.
     :param azw3_path: путь итогового ``.azw3``; ``None`` → рядом с EPUB.
-    :raises InputValidationError: при некорректной комбинации опций/зависимостей.
+    :raises InputValidationError: при некорректной комбинации опций/зависимостей
+        либо при отсутствии кэша и ``network_fetcher`` одновременно.
     """
 
     set_correlation_id(uuid.uuid4().hex)
     started = time.perf_counter()
-    _logger.info("run_pipeline.start", book_id=book_id, out_path=str(out_path))
+    _logger.info("run_pipeline.start", book_id=book_id)
 
     if extract_images and (scan_extractor is None or image_processor is None):
         raise InputValidationError(
@@ -210,14 +213,27 @@ def run_pipeline(
             context={"book_id": book_id},
         )
 
-    book = fetch_book(
-        fetcher,
-        parser,
-        book_id,
-        from_page=from_page,
-        to_page=to_page,
-        delay_ms=delay_ms,
-    )
+    if refresh or not workspace.has_raw():
+        if network_fetcher is None:
+            raise InputValidationError(
+                "No cached raw data for this book; "
+                "run `biblioatom download` first or provide a network fetcher.",
+                context={"book_id": book_id, "raw_dir": str(workspace.raw_dir)},
+            )
+        download_book(
+            network_fetcher,
+            fetcher,
+            parser,
+            workspace,
+            book_id,
+            from_page=from_page,
+            to_page=to_page,
+            delay_ms=delay_ms,
+            refresh=refresh,
+        )
+
+    # Оффлайн-сборка: fetcher — LocalFetcher, задержки не нужны.
+    book = fetch_book(fetcher, parser, book_id, from_page=from_page, to_page=to_page)
 
     document = analyze_structure(
         analyzer,
@@ -238,13 +254,14 @@ def run_pipeline(
                 "Image extraction requires both a scan extractor and an image processor.",
                 context={"book_id": book_id},
             )
-        target_dir = images_dir or out_path.parent / "images"
-        scan_result = _extract_images(fetcher, scan_extractor, image_processor, book, target_dir)
+        scan_result = _extract_images(fetcher, scan_extractor, image_processor, book, workspace)
         images = scan_result.images
         failed_scans = scan_result.failed_scans
 
-    build_result = build_epub(epub_builder, document, out_path, images=images)
-    epub_path = build_result.outputs[0] if build_result.outputs else out_path
+    epub_out = out_path or workspace.epub_path
+    epub_out.parent.mkdir(parents=True, exist_ok=True)
+    build_result = build_epub(epub_builder, document, epub_out, images=images)
+    epub_path = build_result.outputs[0] if build_result.outputs else epub_out
 
     azw3_out: Path | None = None
     if convert_azw3:
