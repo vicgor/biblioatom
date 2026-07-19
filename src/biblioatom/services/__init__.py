@@ -143,12 +143,35 @@ class ImageProcessorProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class ProgressReporterProtocol(Protocol):
+    """Приёмник прогресса длительных операций (фазы с известным total).
+
+    Фазы — строковые ключи (``"pages"``/``"scans"``/``"images"``); подписи
+    для пользователя — забота реализации. ``advance``/``finish`` по
+    неначатой фазе должны быть no-op.
+    """
+
+    def start(self, phase: str, total: int) -> None:
+        """Начать фазу с известным числом шагов."""
+        ...
+
+    def advance(self, phase: str) -> None:
+        """Продвинуть фазу на один шаг."""
+        ...
+
+    def finish(self, phase: str) -> None:
+        """Завершить фазу (индикатор убирается)."""
+        ...
+
+
 __all__ = [
     "ConverterProtocol",
     "EpubBuilderProtocol",
     "FetcherProtocol",
     "ImageProcessorProtocol",
     "ParserProtocol",
+    "ProgressReporterProtocol",
     "RawFetcherProtocol",
     "ScanExtractorProtocol",
     "StructureAnalyzerProtocol",
