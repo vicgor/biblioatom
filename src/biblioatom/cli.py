@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -37,6 +37,7 @@ from biblioatom.services.fetcher import Fetcher
 from biblioatom.services.image_processor import ImageProcessor
 from biblioatom.services.local_fetcher import LocalFetcher
 from biblioatom.services.parser import Parser
+from biblioatom.services.progress import RichProgressReporter
 from biblioatom.services.scan_extractor import ScanExtractor
 from biblioatom.services.source_utils import book_id_from_source
 from biblioatom.services.structure_analyzer import StructureAnalyzer
@@ -57,6 +58,7 @@ app = typer.Typer(
 #: Ключи ``ctx.obj`` (избегаем «магических строк» в подкомандах).
 _CONFIG = "config"
 _VERBOSE = "verbose"
+_QUIET = "quiet"
 
 #: Ведущие цифры в имени файла — используются для натуральной сортировки сканов.
 _LEADING_DIGITS_RE = re.compile(r"^(\d+)")
@@ -167,6 +169,18 @@ def _workspace_for(settings: Settings, book_id: str, work_dir: Path | None) -> B
     return BookWorkspace(work_dir=work_dir or settings.app.work_dir, book_id=book_id)
 
 
+def _progress_reporter(*, quiet: bool, verbose: bool) -> RichProgressReporter | None:
+    """Rich-прогресс только в «дефолтном» режиме: без ``-v``/``-vv`` и без ``--quiet``.
+
+    С verbose идут структурные логи (живой бар мешал бы им), с quiet — тишина.
+    На не-TTY Rich дополнительно отключает отрисовку сам.
+    """
+
+    if quiet or verbose:
+        return None
+    return RichProgressReporter()
+
+
 def _version_callback(value: bool) -> None:
     """Вывести версию и выйти."""
     if value:
@@ -220,6 +234,7 @@ def main(
     ctx.ensure_object(dict)
     ctx.obj[_CONFIG] = _load_settings(config_file)
     ctx.obj[_VERBOSE] = verbose >= 1
+    ctx.obj[_QUIET] = quiet
 
 
 @app.command()
@@ -247,15 +262,18 @@ def fetch(
 
         book_id = book_id_from_source(source)
         fetcher, parser = _build_fetcher(settings)
+        reporter = _progress_reporter(quiet=ctx.obj[_QUIET], verbose=verbose)
         try:
-            book = fetch_book(
-                fetcher,
-                parser,
-                book_id,
-                from_page=from_page,
-                to_page=to_page,
-                delay_ms=settings.http.delay_ms,
-            )
+            with reporter if reporter is not None else nullcontext():
+                book = fetch_book(
+                    fetcher,
+                    parser,
+                    book_id,
+                    from_page=from_page,
+                    to_page=to_page,
+                    delay_ms=settings.http.delay_ms,
+                    progress=reporter,
+                )
         finally:
             fetcher.close()
 
@@ -299,18 +317,21 @@ def download(
         workspace = _workspace_for(settings, book_id, work_dir)
         fetcher, parser = _build_fetcher(settings)
         local = LocalFetcher(workspace, parser=parser)
+        reporter = _progress_reporter(quiet=ctx.obj[_QUIET], verbose=verbose)
         try:
-            result = download_book(
-                fetcher,
-                local,
-                parser,
-                workspace,
-                book_id,
-                from_page=from_page,
-                to_page=to_page,
-                delay_ms=settings.http.delay_ms,
-                refresh=refresh,
-            )
+            with reporter if reporter is not None else nullcontext():
+                result = download_book(
+                    fetcher,
+                    local,
+                    parser,
+                    workspace,
+                    book_id,
+                    from_page=from_page,
+                    to_page=to_page,
+                    delay_ms=settings.http.delay_ms,
+                    refresh=refresh,
+                    progress=reporter,
+                )
         finally:
             fetcher.close()
 
@@ -595,27 +616,30 @@ def pipeline(
         workspace = _workspace_for(settings, book_id, work_dir)
         network, parser = _build_fetcher(settings)
         local = LocalFetcher(workspace, parser=parser)
+        reporter = _progress_reporter(quiet=ctx.obj[_QUIET], verbose=verbose)
         try:
-            result = run_pipeline(
-                fetcher=local,
-                network_fetcher=network,
-                parser=parser,
-                analyzer=StructureAnalyzer(chapter_mode.value),
-                epub_builder=EpubBuilder(settings.epub),
-                workspace=workspace,
-                book_id=book_id,
-                out_path=output,
-                refresh=refresh,
-                source=source,
-                from_page=from_page,
-                to_page=to_page,
-                delay_ms=settings.http.delay_ms,
-                extract_images=images,
-                scan_extractor=ScanExtractor(settings.scan_extraction) if images else None,
-                image_processor=ImageProcessor(settings.image) if images else None,
-                convert_azw3=azw3,
-                converter=EbookConvertConverter(settings.conversion) if azw3 else None,
-            )
+            with reporter if reporter is not None else nullcontext():
+                result = run_pipeline(
+                    fetcher=local,
+                    network_fetcher=network,
+                    parser=parser,
+                    analyzer=StructureAnalyzer(chapter_mode.value),
+                    epub_builder=EpubBuilder(settings.epub),
+                    workspace=workspace,
+                    book_id=book_id,
+                    out_path=output,
+                    refresh=refresh,
+                    source=source,
+                    from_page=from_page,
+                    to_page=to_page,
+                    delay_ms=settings.http.delay_ms,
+                    extract_images=images,
+                    scan_extractor=ScanExtractor(settings.scan_extraction) if images else None,
+                    image_processor=ImageProcessor(settings.image) if images else None,
+                    convert_azw3=azw3,
+                    converter=EbookConvertConverter(settings.conversion) if azw3 else None,
+                    progress=reporter,
+                )
         finally:
             network.close()
 

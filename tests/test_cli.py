@@ -112,6 +112,57 @@ class TestDownloadCommand:
         assert "3" in result.output  # счётчик страниц в выводе
 
 
+class TestProgressReporter:
+    def test_default_mode_returns_reporter(self) -> None:
+        from biblioatom.cli import _progress_reporter
+        from biblioatom.services.progress import RichProgressReporter
+
+        assert isinstance(_progress_reporter(quiet=False, verbose=False), RichProgressReporter)
+
+    def test_quiet_returns_none(self) -> None:
+        from biblioatom.cli import _progress_reporter
+
+        assert _progress_reporter(quiet=True, verbose=False) is None
+
+    def test_verbose_returns_none(self) -> None:
+        from biblioatom.cli import _progress_reporter
+
+        assert _progress_reporter(quiet=False, verbose=True) is None
+
+    def test_download_passes_reporter_by_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from biblioatom.core.download_book import DownloadResult
+        from biblioatom.services.progress import RichProgressReporter
+
+        captured: dict[str, object] = {}
+
+        def fake_download(network, local, parser, workspace, book_id, **kwargs):  # type: ignore[no-untyped-def]
+            captured["progress"] = kwargs.get("progress")
+            return DownloadResult(book_id=book_id, title="Книга", max_page=1)
+
+        monkeypatch.setattr("biblioatom.core.download_book.download_book", fake_download)
+        result = runner.invoke(app, ["download", "bid", "--work-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert isinstance(captured["progress"], RichProgressReporter)
+
+    def test_download_verbose_passes_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from biblioatom.core.download_book import DownloadResult
+
+        captured: dict[str, object] = {}
+
+        def fake_download(network, local, parser, workspace, book_id, **kwargs):  # type: ignore[no-untyped-def]
+            captured["progress"] = kwargs.get("progress")
+            return DownloadResult(book_id=book_id, title="Книга", max_page=1)
+
+        monkeypatch.setattr("biblioatom.core.download_book.download_book", fake_download)
+        result = runner.invoke(app, ["-v", "download", "bid", "--work-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert captured["progress"] is None
+
+
 class TestCleanCommand:
     def _make_workspace(self, tmp_path: Path) -> BookWorkspace:
         ws = BookWorkspace(work_dir=tmp_path, book_id="bid")
