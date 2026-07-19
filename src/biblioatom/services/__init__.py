@@ -156,8 +156,8 @@ class ProgressReporterProtocol(Protocol):
         """Начать фазу с известным числом шагов."""
         ...
 
-    def advance(self, phase: str) -> None:
-        """Продвинуть фазу на один шаг."""
+    def advance(self, phase: str, *, skipped: bool = False) -> None:
+        """Продвинуть фазу на один шаг; ``skipped=True`` — шаг пропущен (кэш)."""
         ...
 
     def finish(self, phase: str) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from io import StringIO
 
 from rich.console import Console
@@ -14,6 +15,11 @@ def _reporter() -> tuple[RichProgressReporter, StringIO]:
     buf = StringIO()
     console = Console(file=buf, force_terminal=True, width=80)
     return RichProgressReporter(console=console), buf
+
+
+def _strip_ansi(s: str) -> str:
+    """Удалить ANSI escape-коды из строки."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", s)
 
 
 def test_satisfies_protocol() -> None:
@@ -68,3 +74,42 @@ def test_exit_stops_rendering_after_exception() -> None:
     with reporter:
         reporter.start("pages", 1)
         reporter.finish("pages")
+
+
+def test_fully_skipped_phase_prints_cache_note() -> None:
+    reporter, buf = _reporter()
+    with reporter:
+        reporter.start("pages", 3)
+        reporter.advance("pages", skipped=True)
+        reporter.advance("pages", skipped=True)
+        reporter.advance("pages", skipped=True)
+        reporter.finish("pages")
+    assert "Страницы: 3 из кэша" in _strip_ansi(buf.getvalue())
+
+
+def test_partially_skipped_phase_prints_no_cache_note() -> None:
+    reporter, buf = _reporter()
+    with reporter:
+        reporter.start("pages", 2)
+        reporter.advance("pages", skipped=True)
+        reporter.advance("pages")  # реально скачано
+        reporter.finish("pages")
+    assert "из кэша" not in _strip_ansi(buf.getvalue())
+
+
+def test_empty_phase_prints_no_cache_note() -> None:
+    reporter, buf = _reporter()
+    with reporter:
+        reporter.start("scans", 0)
+        reporter.finish("scans")
+    assert "из кэша" not in _strip_ansi(buf.getvalue())
+
+
+def test_downloaded_phase_prints_no_cache_note() -> None:
+    reporter, buf = _reporter()
+    with reporter:
+        reporter.start("scans", 2)
+        reporter.advance("scans")
+        reporter.advance("scans")
+        reporter.finish("scans")
+    assert "из кэша" not in _strip_ansi(buf.getvalue())

@@ -49,6 +49,8 @@ class RichProgressReporter:
             transient=True,
         )
         self._tasks: dict[str, TaskID] = {}
+        self._totals: dict[str, int] = {}
+        self._skipped: dict[str, int] = {}
 
     def __enter__(self) -> RichProgressReporter:
         self._progress.start()
@@ -70,20 +72,30 @@ class RichProgressReporter:
             self._progress.remove_task(existing)
         label = _PHASE_LABELS.get(phase, phase)
         self._tasks[phase] = self._progress.add_task(label, total=total)
+        self._totals[phase] = total
+        self._skipped[phase] = 0
 
-    def advance(self, phase: str) -> None:
-        """Шаг фазы; неначатая фаза — no-op (прогресс не роняет пайплайн)."""
+    def advance(self, phase: str, *, skipped: bool = False) -> None:
+        """Шаг фазы; неначатая фаза — no-op. ``skipped`` — шаг взят из кэша."""
 
         task_id = self._tasks.get(phase)
         if task_id is not None:
             self._progress.advance(task_id)
+            if skipped:
+                self._skipped[phase] = self._skipped.get(phase, 0) + 1
 
     def finish(self, phase: str) -> None:
-        """Убрать индикатор фазы; неначатая фаза — no-op."""
+        """Убрать индикатор фазы; целиком пропущенная из кэша фаза оставляет строку."""
 
         task_id = self._tasks.pop(phase, None)
-        if task_id is not None:
-            self._progress.remove_task(task_id)
+        if task_id is None:
+            return
+        total = self._totals.pop(phase, 0)
+        skipped = self._skipped.pop(phase, 0)
+        self._progress.remove_task(task_id)
+        if total > 0 and skipped == total:
+            label = _PHASE_LABELS.get(phase, phase)
+            self._progress.console.print(f"{label}: {total} из кэша", style="dim")
 
 
 __all__ = ["RichProgressReporter"]
