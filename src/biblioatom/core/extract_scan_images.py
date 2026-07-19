@@ -20,7 +20,11 @@ from pathlib import Path
 from biblioatom.errors import ImageProcessingError, ScanExtractionError
 from biblioatom.logging_config import get_logger
 from biblioatom.models import ElementKind, ImageAsset, PageModel
-from biblioatom.services import ImageProcessorProtocol, ScanExtractorProtocol
+from biblioatom.services import (
+    ImageProcessorProtocol,
+    ProgressReporterProtocol,
+    ScanExtractorProtocol,
+)
 
 _logger = get_logger(__name__)
 
@@ -104,6 +108,8 @@ def extract_scan_images(
     processor: ImageProcessorProtocol,
     scans: Sequence[tuple[int, Path]],
     out_dir: Path,
+    *,
+    progress: ProgressReporterProtocol | None = None,
 ) -> ScanExtractionResult:
     """Извлечь и постобработать иллюстрации из набора сканов.
 
@@ -111,27 +117,38 @@ def extract_scan_images(
     :param processor: реализация :class:`ImageProcessorProtocol`.
     :param scans: пары ``(page, path)`` — номер страницы и путь к файлу скана.
     :param out_dir: каталог для сохранения обработанных кропов.
+    :param progress: приёмник прогресса фазы "images"; None — тишина.
     """
 
     started = time.perf_counter()
     result = ScanExtractionResult()
 
+    if progress is not None:
+        progress.start("images", len(scans))
+
     for page, scan_path in scans:
         try:
-            data = scan_path.read_bytes()
-            crops = extractor.extract(data, page)
-            for index, crop in enumerate(crops):
-                out_path = out_dir / f"{page:04d}_{index:02d}"
-                result.images.append(processor.process(crop, out_path))
-        except (ScanExtractionError, ImageProcessingError, OSError) as exc:
-            # Best-effort: сбой одного скана не должен ронять обработку остальных.
-            result.failed_scans.append(scan_path)
-            _logger.warning(
-                "extract_scan_images.scan_failed",
-                page=page,
-                path=str(scan_path),
-                error=str(exc),
-            )
+            try:
+                data = scan_path.read_bytes()
+                crops = extractor.extract(data, page)
+                for index, crop in enumerate(crops):
+                    out_path = out_dir / f"{page:04d}_{index:02d}"
+                    result.images.append(processor.process(crop, out_path))
+            except (ScanExtractionError, ImageProcessingError, OSError) as exc:
+                # Best-effort: сбой одного скана не должен ронять обработку остальных.
+                result.failed_scans.append(scan_path)
+                _logger.warning(
+                    "extract_scan_images.scan_failed",
+                    page=page,
+                    path=str(scan_path),
+                    error=str(exc),
+                )
+        finally:
+            if progress is not None:
+                progress.advance("images")
+
+    if progress is not None:
+        progress.finish("images")
 
     duration_ms = round((time.perf_counter() - started) * 1000, 2)
     _logger.info(

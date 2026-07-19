@@ -190,3 +190,49 @@ def test_extract_scan_images_missing_file_is_best_effort(tmp_path: Path) -> None
 
     assert result.failed_scans == [missing]
     assert result.images == []
+
+
+class _SpyProgress:
+    """Шпион ProgressReporterProtocol: копит события (kind, phase, total)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, int | None]] = []
+
+    def start(self, phase: str, total: int) -> None:
+        self.events.append(("start", phase, total))
+
+    def advance(self, phase: str) -> None:
+        self.events.append(("advance", phase, None))
+
+    def finish(self, phase: str) -> None:
+        self.events.append(("finish", phase, None))
+
+
+def test_progress_reports_images_phase_including_failed_scan(tmp_path: Path) -> None:
+    """advance — на каждом скане, включая несуществующий файл (best-effort)."""
+
+    class _NoCropExtractor:
+        def extract(self, image: bytes, page: int) -> list[ExtractedImage]:
+            return []
+
+    class _NoopProcessor:
+        def process(self, image: ExtractedImage, out_path: Path) -> ImageAsset:
+            return ImageAsset(page=image.page, path=out_path)
+
+    good = tmp_path / "0001.jpg"
+    good.write_bytes(b"\xff\xd8")
+    missing = tmp_path / "0002.jpg"  # не создаём — OSError → failed_scans
+
+    spy = _SpyProgress()
+    result = extract_scan_images(
+        _NoCropExtractor(),
+        _NoopProcessor(),
+        [(1, good), (2, missing)],
+        tmp_path / "out",
+        progress=spy,
+    )
+
+    assert result.failed_scans == [missing]
+    assert spy.events[0] == ("start", "images", 2)
+    assert len([e for e in spy.events if e[0] == "advance"]) == 2
+    assert spy.events[-1] == ("finish", "images", None)

@@ -142,6 +142,50 @@ class TestPageErrorHandling:
             fetch_book(fetcher, _parser(), "book", from_page=0, to_page=2)
 
 
+class _SpyProgress:
+    """Шпион ProgressReporterProtocol: копит события (kind, phase, total)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, int | None]] = []
+
+    def start(self, phase: str, total: int) -> None:
+        self.events.append(("start", phase, total))
+
+    def advance(self, phase: str) -> None:
+        self.events.append(("advance", phase, None))
+
+    def finish(self, phase: str) -> None:
+        self.events.append(("finish", phase, None))
+
+
+def test_progress_reports_pages_phase_including_failures() -> None:
+    """advance — на каждой странице, включая best-effort-сбойную."""
+
+    class _Fetcher:
+        def fetch_book_meta(self, book_id: str) -> BookMeta:
+            return BookMeta(title="Книга", max_page=2)
+
+        def fetch_toc(self, book_id: str) -> list[TocEntry]:
+            return []
+
+        def fetch_page(self, book_id: str, page: int) -> EmbeddedContent:
+            if page == 1:
+                raise FetchError("boom", context={"page": page})
+            return EmbeddedContent(valid=True, pagehtml=f"<p>стр {page}</p>")
+
+        def fetch_image(self, book_id: str, page: int) -> bytes:
+            return b""
+
+    spy = _SpyProgress()
+    book = fetch_book(_Fetcher(), Parser(ParsingSettings()), "bid", progress=spy)
+
+    assert book.failed_pages == [1]
+    assert spy.events[0] == ("start", "pages", 3)  # страницы 0..2
+    advances = [e for e in spy.events if e[0] == "advance"]
+    assert len(advances) == 3  # включая сбойную
+    assert spy.events[-1] == ("finish", "pages", None)
+
+
 def test_book_payload_matches_fetch_json_format() -> None:
     from biblioatom.core.fetch_book import book_payload
     from biblioatom.models import EmbeddedContent, PageModel, TocEntry

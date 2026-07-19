@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from biblioatom.errors import FetchError, InputValidationError, ParseError
 from biblioatom.logging_config import get_logger
 from biblioatom.models import EmbeddedContent, PageModel, TocEntry
-from biblioatom.services import FetcherProtocol, ParserProtocol
+from biblioatom.services import FetcherProtocol, ParserProtocol, ProgressReporterProtocol
 
 _logger = get_logger(__name__)
 
@@ -91,6 +91,7 @@ def fetch_book(
     from_page: int = 0,
     to_page: int | None = None,
     delay_ms: int = 0,
+    progress: ProgressReporterProtocol | None = None,
 ) -> FetchedBook:
     """Загрузить книгу: метаданные, TOC и диапазон страниц.
 
@@ -100,6 +101,7 @@ def fetch_book(
     :param from_page: первая страница диапазона (0-based, включительно).
     :param to_page: последняя страница (включительно); ``None`` → до ``max_page``.
     :param delay_ms: пауза между запросами страниц, мс (вежливость к серверу).
+    :param progress: приёмник прогресса фазы "pages"; None — тишина.
     :raises InputValidationError: при некорректном диапазоне страниц.
     """
 
@@ -139,44 +141,54 @@ def fetch_book(
     pages: list[PageModel] = []
     failed: list[int] = []
 
+    if progress is not None:
+        progress.start("pages", total)
+
     for index, page_no in enumerate(range(from_page, to_page + 1)):
         try:
-            content = fetcher.fetch_page(book_id, page_no)
-        except (FetchError, ParseError) as exc:
-            # M2: best-effort только по доменным ошибкам — сетевой сбой или
-            # неразбираемый ответ страницы не рвёт всю книгу. Программные
-            # исключения (AttributeError/KeyError/TypeError) сюда НЕ попадают и
-            # всплывают наружу, чтобы баги не маскировались под сбой страницы.
-            failed.append(page_no)
-            _logger.warning(
-                "fetch_book.page_failed",
+            try:
+                content = fetcher.fetch_page(book_id, page_no)
+            except (FetchError, ParseError) as exc:
+                # M2: best-effort только по доменным ошибкам — сетевой сбой или
+                # неразбираемый ответ страницы не рвёт всю книгу. Программные
+                # исключения (AttributeError/KeyError/TypeError) сюда НЕ попадают и
+                # всплывают наружу, чтобы баги не маскировались под сбой страницы.
+                failed.append(page_no)
+                _logger.warning(
+                    "fetch_book.page_failed",
+                    book_id=book_id,
+                    page=page_no,
+                    error=str(exc),
+                )
+                content = EmbeddedContent(valid=False)
+
+            model = parser.page_to_model(page_no, content)
+            # print_page приходит из TOC и привязан к физическому индексу; модель
+            # строится парсером без него, поэтому проставляем здесь.
+            print_page = print_pages.get(page_no)
+            if print_page is not None:
+                model.print_page = print_page
+            # Страница 0 — всегда обложка (нет печатного номера, CDN = 0000.jpg).
+            if page_no == 0:
+                model.is_cover = True
+            pages.append(model)
+
+            _logger.debug(
+                "fetch_book.page_done",
                 book_id=book_id,
                 page=page_no,
-                error=str(exc),
+                done=index + 1,
+                total=total,
             )
-            content = EmbeddedContent(valid=False)
 
-        model = parser.page_to_model(page_no, content)
-        # print_page приходит из TOC и привязан к физическому индексу; модель
-        # строится парсером без него, поэтому проставляем здесь.
-        print_page = print_pages.get(page_no)
-        if print_page is not None:
-            model.print_page = print_page
-        # Страница 0 — всегда обложка (нет печатного номера, CDN = 0000.jpg).
-        if page_no == 0:
-            model.is_cover = True
-        pages.append(model)
+            if delay_ms > 0 and page_no < to_page:
+                time.sleep(delay_ms / 1000.0)
+        finally:
+            if progress is not None:
+                progress.advance("pages")
 
-        _logger.debug(
-            "fetch_book.page_done",
-            book_id=book_id,
-            page=page_no,
-            done=index + 1,
-            total=total,
-        )
-
-        if delay_ms > 0 and page_no < to_page:
-            time.sleep(delay_ms / 1000.0)
+    if progress is not None:
+        progress.finish("pages")
 
     _logger.info(
         "fetch_book.done",
