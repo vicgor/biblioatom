@@ -12,6 +12,7 @@ build/
 htmlcov/
 output/
 output_books/
+books/
 
 # Одноразовые скрипты-черновики (не часть проекта)
 crop_photos.py

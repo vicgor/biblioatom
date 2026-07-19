@@ -549,9 +549,13 @@ def pipeline(
     ctx: typer.Context,
     source: Annotated[str, typer.Argument(help="Идентификатор книги или URL.")],
     output: Annotated[
-        Path,
-        typer.Option("--output", "-o", help="Путь итогового .epub."),
-    ] = Path("book.epub"),
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Путь итогового .epub (default: books/<book_id>/<book_id>.epub).",
+        ),
+    ] = None,
     from_page: Annotated[
         int,
         typer.Option("--from-page", help="Первая страница (0-based)."),
@@ -572,26 +576,36 @@ def pipeline(
         bool,
         typer.Option("--azw3", help="Дополнительно собрать AZW3 (нужен Calibre)."),
     ] = False,
+    refresh: Annotated[
+        bool,
+        typer.Option("--refresh", help="Перекачать сырьё заново, игнорируя кэш."),
+    ] = False,
+    work_dir: Annotated[
+        Path | None,
+        typer.Option("--work-dir", help="Корень рабочих каталогов (default: books)."),
+    ] = None,
 ) -> None:
-    """Полный пайплайн: загрузка → анализ → (сканы) → EPUB → (AZW3)."""
+    """Полный пайплайн: [download при отсутствии кэша] → анализ → (сканы) → EPUB → (AZW3)."""
     settings: Settings = ctx.obj[_CONFIG]
     verbose: bool = ctx.obj[_VERBOSE]
     with _handle_errors(verbose=verbose):
         from biblioatom.core.run_pipeline import run_pipeline
 
         book_id = book_id_from_source(source)
-        fetcher, parser = _build_fetcher(settings)
+        workspace = _workspace_for(settings, book_id, work_dir)
+        network, parser = _build_fetcher(settings)
+        local = LocalFetcher(workspace, parser=parser)
         try:
-            # TODO(task-10): команда переводится на BookWorkspace/LocalFetcher/
-            # network_fetcher — вызов ниже временно использует старый набор
-            # аргументов и требует type: ignore до полного переписывания.
-            result = run_pipeline(  # type: ignore[call-arg]
-                fetcher=fetcher,
+            result = run_pipeline(
+                fetcher=local,
+                network_fetcher=network,
                 parser=parser,
                 analyzer=StructureAnalyzer(chapter_mode.value),
                 epub_builder=EpubBuilder(settings.epub),
+                workspace=workspace,
                 book_id=book_id,
                 out_path=output,
+                refresh=refresh,
                 source=source,
                 from_page=from_page,
                 to_page=to_page,
@@ -603,7 +617,7 @@ def pipeline(
                 converter=EbookConvertConverter(settings.conversion) if azw3 else None,
             )
         finally:
-            fetcher.close()
+            network.close()
 
         console.print(
             f"[green]✓[/green] [bold]{result.title}[/bold] — "

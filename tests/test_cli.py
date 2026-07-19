@@ -145,6 +145,30 @@ class TestCleanCommand:
         assert result.exit_code == 3
 
 
+class TestPipelineWorkspace:
+    def test_pipeline_passes_workspace_and_default_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from biblioatom.core.run_pipeline import PipelineResult
+
+        captured: dict[str, object] = {}
+
+        def fake_run_pipeline(**kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+            ws = kwargs["workspace"]
+            return PipelineResult(book_id="bid", title="Книга", epub_path=ws.epub_path)
+
+        monkeypatch.setattr("biblioatom.core.run_pipeline.run_pipeline", fake_run_pipeline)
+        result = runner.invoke(app, ["pipeline", "bid", "--work-dir", str(tmp_path), "--refresh"])
+        assert result.exit_code == 0
+        ws = captured["workspace"]
+        assert ws.root == tmp_path / "bid"  # type: ignore[union-attr]
+        assert captured["out_path"] is None  # default → workspace.epub_path
+        assert captured["refresh"] is True
+        assert captured["network_fetcher"] is not None
+        assert captured["fetcher"] is not captured["network_fetcher"]
+
+
 class TestErrorMapping:
     def test_fetch_error_exit_code(self) -> None:
         def boom(*_args: Any, **_kwargs: Any) -> FetchedBook:
