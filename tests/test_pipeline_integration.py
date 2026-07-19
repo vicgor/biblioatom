@@ -59,6 +59,22 @@ class _FakeNetworkFetcher:
         return self._image
 
 
+class _SpyProgress:
+    """Шпион ProgressReporterProtocol: копит события (kind, phase, total)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, int | None]] = []
+
+    def start(self, phase: str, total: int) -> None:
+        self.events.append(("start", phase, total))
+
+    def advance(self, phase: str) -> None:
+        self.events.append(("advance", phase, None))
+
+    def finish(self, phase: str) -> None:
+        self.events.append(("finish", phase, None))
+
+
 def _services() -> tuple[Parser, StructureAnalyzer, EpubBuilder]:
     return (
         Parser(ParsingSettings()),
@@ -287,3 +303,26 @@ def test_pipeline_extracts_scans_best_effort(tmp_path: Path) -> None:
     # Кэш сканов — в raw/scans, дублей *_raw.jpg в images/ нет.
     assert ws.scan_path(0).is_file()
     assert list(ws.images_dir.glob("*_raw.jpg")) == []
+
+
+def test_pipeline_forwards_progress_to_download_only(tmp_path: Path) -> None:
+    """progress получает фазы download'а (pages, scans), но не оффлайн-перепарса."""
+
+    parser, analyzer, builder = _services()
+    ws = _workspace(tmp_path)
+    spy = _SpyProgress()
+
+    run_pipeline(
+        fetcher=LocalFetcher(ws, parser=parser),
+        network_fetcher=_FakeNetworkFetcher(),
+        parser=parser,
+        analyzer=analyzer,
+        epub_builder=builder,
+        workspace=ws,
+        book_id="test_book",
+        progress=spy,
+    )
+
+    pages_starts = [e for e in spy.events if e[0] == "start" and e[1] == "pages"]
+    # Ровно один старт фазы pages — от download_book; оффлайн-fetch_book молчит.
+    assert len(pages_starts) == 1

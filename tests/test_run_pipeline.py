@@ -57,6 +57,22 @@ def _cover_book() -> FetchedBook:
     return FetchedBook(book_id="bid", title="Книга", max_page=0, pages=[cover])
 
 
+class _SpyProgress:
+    """Шпион ProgressReporterProtocol: копит события (kind, phase, total)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, int | None]] = []
+
+    def start(self, phase: str, total: int) -> None:
+        self.events.append(("start", phase, total))
+
+    def advance(self, phase: str) -> None:
+        self.events.append(("advance", phase, None))
+
+    def finish(self, phase: str) -> None:
+        self.events.append(("finish", phase, None))
+
+
 # --- _extract_images: обложка ----------------------------------------------
 
 
@@ -111,3 +127,18 @@ def test_scans_are_read_from_workspace_not_duplicated(tmp_path: Path) -> None:
     assert [img.page for img in result.images] == [5]
     assert processor.processed[0].data == b"\x89PNGscan"
     assert list(ws.images_dir.glob("*_raw.jpg")) == []
+
+
+def test_extract_images_forwards_progress(tmp_path: Path) -> None:
+    """_extract_images прокидывает progress в extract_scan_images (фаза images)."""
+
+    ws = BookWorkspace(work_dir=tmp_path, book_id="bid")
+    spy = _SpyProgress()
+
+    _extract_images(
+        _CoverFetcher(b"cover"), _NoopExtractor(), _SpyProcessor(), _cover_book(), ws, spy
+    )
+
+    # Фото-страниц нет — фаза images стартует с total=0 и закрывается.
+    assert ("start", "images", 0) in spy.events
+    assert ("finish", "images", None) in spy.events

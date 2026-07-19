@@ -49,6 +49,7 @@ from biblioatom.services import (
     FetcherProtocol,
     ImageProcessorProtocol,
     ParserProtocol,
+    ProgressReporterProtocol,
     RawFetcherProtocol,
     ScanExtractorProtocol,
     StructureAnalyzerProtocol,
@@ -84,6 +85,7 @@ def _extract_images(
     image_processor: ImageProcessorProtocol,
     book: FetchedBook,
     workspace: BookWorkspace,
+    progress: ProgressReporterProtocol | None = None,
 ) -> ScanExtractionResult:
     """Извлечь иллюстрации из закэшированных сканов рабочего каталога.
 
@@ -92,6 +94,8 @@ def _extract_images(
     скана попадает в ``failed_scans`` (best-effort, внутри
     ``extract_scan_images``). Обложка приходит через ``fetcher.fetch_image``
     (оффлайн-фетчер) и проходит тот же ImageProcessor, что и сканы.
+    ``progress`` пробрасывается в ``extract_scan_images`` (фаза "images");
+    обложка прогресс не отражает.
     """
 
     images_dir = workspace.images_dir
@@ -142,7 +146,9 @@ def _extract_images(
     _logger.info("run_pipeline.scan_pages_selected", count=len(photo_pages))
     scans = [(photo.page, workspace.scan_path(photo.cdn_page)) for photo in photo_pages]
 
-    result = extract_scan_images(scan_extractor, image_processor, scans, images_dir)
+    result = extract_scan_images(
+        scan_extractor, image_processor, scans, images_dir, progress=progress
+    )
     result.images = cover_assets + result.images
     return result
 
@@ -168,6 +174,7 @@ def run_pipeline(
     convert_azw3: bool = False,
     converter: ConverterProtocol | None = None,
     azw3_path: Path | None = None,
+    progress: ProgressReporterProtocol | None = None,
 ) -> PipelineResult:
     """Прогнать полный пайплайн: [загрузка] → анализ → (сканы) → EPUB → (AZW3).
 
@@ -194,6 +201,7 @@ def run_pipeline(
     :param convert_azw3: конвертировать ли EPUB в AZW3 после сборки.
     :param converter: конвертер; обязателен при ``convert_azw3``.
     :param azw3_path: путь итогового ``.azw3``; ``None`` → рядом с EPUB.
+    :param progress: приёмник прогресса download-фаз и извлечения иллюстраций.
     :raises InputValidationError: при некорректной комбинации опций/зависимостей
         либо при отсутствии кэша и ``network_fetcher`` одновременно.
     """
@@ -230,9 +238,11 @@ def run_pipeline(
             to_page=to_page,
             delay_ms=delay_ms,
             refresh=refresh,
+            progress=progress,
         )
 
-    # Оффлайн-сборка: fetcher — LocalFetcher, задержки не нужны.
+    # Оффлайн-сборка: fetcher — LocalFetcher, задержки не нужны. Без progress —
+    # иначе фаза pages задвоилась бы (уже отражена в download_book выше).
     book = fetch_book(fetcher, parser, book_id, from_page=from_page, to_page=to_page)
 
     document = analyze_structure(
@@ -254,7 +264,9 @@ def run_pipeline(
                 "Image extraction requires both a scan extractor and an image processor.",
                 context={"book_id": book_id},
             )
-        scan_result = _extract_images(fetcher, scan_extractor, image_processor, book, workspace)
+        scan_result = _extract_images(
+            fetcher, scan_extractor, image_processor, book, workspace, progress
+        )
         images = scan_result.images
         failed_scans = scan_result.failed_scans
 
