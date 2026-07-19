@@ -22,7 +22,12 @@ from biblioatom.core.extract_scan_images import select_photo_pages
 from biblioatom.core.fetch_book import book_payload, fetch_book, validate_page_range
 from biblioatom.errors import FetchError, WorkspaceError
 from biblioatom.logging_config import get_logger
-from biblioatom.services import FetcherProtocol, ParserProtocol, RawFetcherProtocol
+from biblioatom.services import (
+    FetcherProtocol,
+    ParserProtocol,
+    ProgressReporterProtocol,
+    RawFetcherProtocol,
+)
 from biblioatom.services.workspace import BookWorkspace
 
 _logger = get_logger(__name__)
@@ -76,6 +81,7 @@ def download_book(
     to_page: int | None = None,
     delay_ms: int = 0,
     refresh: bool = False,
+    progress: ProgressReporterProtocol | None = None,
 ) -> DownloadResult:
     """Скачать сырьё книги в ``workspace`` и записать ``book.json``.
 
@@ -89,6 +95,7 @@ def download_book(
     :param to_page: последняя страница (включительно); ``None`` → до ``max_page``.
     :param delay_ms: пауза между сетевыми запросами, мс.
     :param refresh: перекачать заново даже при наличии файлов в кэше.
+    :param progress: приёмник прогресса фаз "pages" и "scans"; None — тишина.
     :raises InputValidationError: при некорректном диапазоне страниц.
     :raises WorkspaceError: при сбое записи в рабочий каталог.
     """
@@ -114,22 +121,30 @@ def download_book(
         refresh=refresh,
     )
 
+    if progress is not None:
+        progress.start("pages", resolved_to - from_page + 1)
     for page in range(from_page, resolved_to + 1):
-        path = workspace.page_path(page)
-        if path.is_file() and not refresh:
-            result.pages_skipped += 1
-            continue
         try:
-            raw = network.fetch_page_raw(book_id, page)
-        except FetchError as exc:
-            # Best-effort: сбой страницы не обрывает загрузку книги.
-            result.failed_pages.append(page)
-            _logger.warning("download_book.page_failed", page=page, error=str(exc))
-            continue
-        _write_text(path, raw)
-        result.pages_downloaded += 1
-        if delay_ms > 0 and page < resolved_to:
-            time.sleep(delay_ms / 1000.0)
+            path = workspace.page_path(page)
+            if path.is_file() and not refresh:
+                result.pages_skipped += 1
+                continue
+            try:
+                raw = network.fetch_page_raw(book_id, page)
+            except FetchError as exc:
+                # Best-effort: сбой страницы не обрывает загрузку книги.
+                result.failed_pages.append(page)
+                _logger.warning("download_book.page_failed", page=page, error=str(exc))
+                continue
+            _write_text(path, raw)
+            result.pages_downloaded += 1
+            if delay_ms > 0 and page < resolved_to:
+                time.sleep(delay_ms / 1000.0)
+        finally:
+            if progress is not None:
+                progress.advance("pages")
+    if progress is not None:
+        progress.finish("pages")
 
     # Распарсенный артефакт book.json — через общий fetch_book поверх кэша.
     book = fetch_book(local, parser, book_id, from_page=from_page, to_page=resolved_to)
@@ -142,21 +157,29 @@ def download_book(
     # Сканы: обложка + фото-страницы (по подписи CAPTION).
     cdn_pages = [p.page for p in book.pages if p.is_cover][:1]
     cdn_pages += [photo.cdn_page for photo in select_photo_pages(book.pages)]
+    if progress is not None:
+        progress.start("scans", len(cdn_pages))
     for cdn in cdn_pages:
-        scan = workspace.scan_path(cdn)
-        if scan.is_file() and not refresh:
-            result.scans_skipped += 1
-            continue
         try:
-            data = network.fetch_image(book_id, cdn)
-        except FetchError as exc:
-            result.failed_scans.append(cdn)
-            _logger.warning("download_book.scan_failed", cdn_page=cdn, error=str(exc))
-            continue
-        _write_bytes(scan, data)
-        result.scans_downloaded += 1
-        if delay_ms > 0:
-            time.sleep(delay_ms / 1000.0)
+            scan = workspace.scan_path(cdn)
+            if scan.is_file() and not refresh:
+                result.scans_skipped += 1
+                continue
+            try:
+                data = network.fetch_image(book_id, cdn)
+            except FetchError as exc:
+                result.failed_scans.append(cdn)
+                _logger.warning("download_book.scan_failed", cdn_page=cdn, error=str(exc))
+                continue
+            _write_bytes(scan, data)
+            result.scans_downloaded += 1
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
+        finally:
+            if progress is not None:
+                progress.advance("scans")
+    if progress is not None:
+        progress.finish("scans")
 
     duration_ms = round((time.perf_counter() - started) * 1000, 2)
     _logger.info(

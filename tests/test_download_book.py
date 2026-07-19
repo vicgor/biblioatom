@@ -45,6 +45,22 @@ class _FakeNetwork:
         return b"\xff\xd8scan"
 
 
+class _SpyProgress:
+    """Шпион ProgressReporterProtocol: копит события (kind, phase, total)."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, int | None]] = []
+
+    def start(self, phase: str, total: int) -> None:
+        self.events.append(("start", phase, total))
+
+    def advance(self, phase: str) -> None:
+        self.events.append(("advance", phase, None))
+
+    def finish(self, phase: str) -> None:
+        self.events.append(("finish", phase, None))
+
+
 def _run(
     tmp_path: Path,
     network: _FakeNetwork | None = None,
@@ -52,6 +68,7 @@ def _run(
     refresh: bool = False,
     from_page: int = 0,
     to_page: int | None = None,
+    progress: _SpyProgress | None = None,
 ) -> tuple[_FakeNetwork, BookWorkspace, DownloadResult]:
     net = network or _FakeNetwork()
     ws = BookWorkspace(work_dir=tmp_path / "books", book_id="bid")
@@ -66,6 +83,7 @@ def _run(
         from_page=from_page,
         to_page=to_page,
         refresh=refresh,
+        progress=progress,
     )
     return net, ws, result
 
@@ -118,3 +136,33 @@ def test_download_page_failure_is_best_effort(tmp_path: Path) -> None:
 def test_download_invalid_range_raises(tmp_path: Path) -> None:
     with pytest.raises(InputValidationError):
         _run(tmp_path, from_page=5, to_page=1)
+
+
+def test_progress_reports_pages_then_scans(tmp_path: Path) -> None:
+    """Фазы идут последовательно; advance на каждой итерации обоих циклов."""
+
+    spy = _SpyProgress()
+    _, _, result = _run(tmp_path, progress=spy)
+
+    starts = [e for e in spy.events if e[0] == "start"]
+    assert starts == [("start", "pages", 3), ("start", "scans", 2)]
+    assert [e for e in spy.events if e[0] == "advance" and e[1] == "pages"] == [
+        ("advance", "pages", None)
+    ] * 3
+    assert [e for e in spy.events if e[0] == "advance" and e[1] == "scans"] == [
+        ("advance", "scans", None)
+    ] * 2
+    finishes = [e for e in spy.events if e[0] == "finish"]
+    assert finishes == [("finish", "pages", None), ("finish", "scans", None)]
+
+
+def test_progress_advances_on_cached_skips(tmp_path: Path) -> None:
+    """Идемпотентный повтор: advance и на пропущенных-из-кэша элементах."""
+
+    _run(tmp_path)  # наполняем кэш
+    spy = _SpyProgress()
+    _, _, result = _run(tmp_path, progress=spy)
+
+    assert result.pages_skipped == 3
+    assert len([e for e in spy.events if e[0] == "advance" and e[1] == "pages"]) == 3
+    assert len([e for e in spy.events if e[0] == "advance" and e[1] == "scans"]) == 2
