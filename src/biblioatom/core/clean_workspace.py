@@ -58,9 +58,7 @@ def _remove(path: Path) -> None:
         ) from exc
 
 
-def clean_workspace(
-    workspace: BookWorkspace, scope: CleanScope = CleanScope.SCANS
-) -> CleanResult:
+def clean_workspace(workspace: BookWorkspace, scope: CleanScope = CleanScope.SCANS) -> CleanResult:
     """Очистить рабочий каталог книги по выбранному объёму.
 
     * ``SCANS`` — только ``raw/scans/`` (тяжёлые сырые JPEG);
