@@ -64,6 +64,12 @@ class InputValidationError(BookgrabError):
     exit_code = ExitCode.INPUT_VALIDATION
 
 
+class WorkspaceError(InputValidationError):
+    """Ошибка работы с рабочим каталогом книги (запись/удаление кэша)."""
+
+    exit_code = ExitCode.INPUT_VALIDATION
+
+
 class FetchError(BookgrabError):
     """Сбой сетевого взаимодействия с источником."""
 
@@ -164,5 +170,6 @@ __all__ = [
     "ResourceNotFoundError",
     "ScanExtractionError",
     "StructureAnalysisError",
+    "WorkspaceError",
     "exit_code_for",
 ]

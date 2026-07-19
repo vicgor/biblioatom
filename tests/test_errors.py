@@ -73,6 +73,14 @@ def test_str_without_context() -> None:
     assert str(ConfigurationError("msg")) == "msg"
 
 
+def test_workspace_error_is_input_validation() -> None:
+    from biblioatom.errors import InputValidationError, WorkspaceError
+
+    exc = WorkspaceError("boom")
+    assert isinstance(exc, InputValidationError)
+    assert exit_code_for(exc) == ExitCode.INPUT_VALIDATION
+
+
 def test_exit_codes_are_stable() -> None:
     assert ExitCode.OK.value == 0
     assert ExitCode.CONFIGURATION.value == 2
