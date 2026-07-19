@@ -243,21 +243,36 @@ class Fetcher:
         self._dump_html_if_debug(url, response)
         return response
 
-    # -- публичный API (FetcherProtocol) -----------------------------------
+    # -- публичный API (FetcherProtocol / RawFetcherProtocol) ----------------
+
+    def fetch_book_meta_raw(self, book_id: str) -> str:
+        """Вернуть сырой HTML страницы книги."""
+
+        url = f"/text/{quote(book_id, safe='')}/"
+        return self._get(url).text
 
     def fetch_book_meta(self, book_id: str) -> BookMeta:
         """Вернуть метаданные книги (:class:`BookMeta`)."""
 
-        url = f"/text/{quote(book_id, safe='')}/"
-        response = self._get(url)
-        return self._parser.parse_book_meta(response.text, book_id)
+        return self._parser.parse_book_meta(self.fetch_book_meta_raw(book_id), book_id)
+
+    def fetch_toc_raw(self, book_id: str) -> str:
+        """Вернуть сырой HTML страницы p0 (оглавление)."""
+
+        url = f"/text/{quote(book_id, safe='')}/p0/"
+        return self._get(url).text
 
     def fetch_toc(self, book_id: str) -> list[TocEntry]:
         """Вернуть оглавление книги (пустой список, если TOC отсутствует)."""
 
-        url = f"/text/{quote(book_id, safe='')}/p0/"
-        response = self._get(url)
-        return self._parser.parse_toc(response.text)
+        return self._parser.parse_toc(self.fetch_toc_raw(book_id))
+
+    def fetch_page_raw(self, book_id: str, page: int) -> str:
+        """Вернуть сырой текст RPC-ответа страницы."""
+
+        rpc = self._app.rpc_path
+        url = f"{rpc}?url={quote(book_id, safe='')}&page={quote(str(page), safe='')}"
+        return self._get(url).text
 
     def fetch_page(self, book_id: str, page: int) -> EmbeddedContent:
         """Вернуть содержимое одной страницы через RPC-эндпоинт.
@@ -268,10 +283,7 @@ class Fetcher:
         в ``pagetext``) — это штатное содержимое, а не сбой запроса.
         """
 
-        rpc = self._app.rpc_path
-        url = f"{rpc}?url={quote(book_id, safe='')}&page={quote(str(page), safe='')}"
-        response = self._get(url)
-        return self._parser.parse_embedded_content(response.text)
+        return self._parser.parse_embedded_content(self.fetch_page_raw(book_id, page))
 
     def fetch_image(self, book_id: str, page: int) -> bytes:
         """Вернуть байты JPEG-скана страницы."""

@@ -213,6 +213,49 @@ class TestFetchMetaTocImage:
             fetcher.fetch_image("book", 9)
 
 
+class TestRawFetching:
+    """Сырые (неразобранные) ответы для кэширования на диск."""
+
+    def test_fetch_page_raw_returns_body_text(self) -> None:
+        raw_json = '{"valid": true, "pagehtml": "<p>x</p>"}'
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=raw_json)
+
+        fetcher = _make_fetcher(handler)
+        assert fetcher.fetch_page_raw("bid", 3) == raw_json
+
+    def test_fetch_book_meta_raw_returns_html(self) -> None:
+        html = '<html><head><title>T / Просмотр</title></head><div data-rel="2"></div></html>'
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=html)
+
+        fetcher = _make_fetcher(handler)
+        assert fetcher.fetch_book_meta_raw("bid") == html
+
+    def test_fetch_toc_raw_returns_html(self) -> None:
+        html = (
+            '<html><body><aside data-type="tree-box-contents">'
+            '<a data-goto-page="0" data-level="0"><span>Обложка</span></a>'
+            "</aside></body></html>"
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=html)
+
+        fetcher = _make_fetcher(handler)
+        assert fetcher.fetch_toc_raw("bid") == html
+
+    def test_fetcher_satisfies_raw_protocol(self) -> None:
+        from biblioatom.services import RawFetcherProtocol
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text="")
+
+        assert isinstance(_make_fetcher(handler), RawFetcherProtocol)
+
+
 class TestDumpHtmlIfDebug:
     """Отладочный дамп управляется уровнем structlog, а не stdlib logging."""
 

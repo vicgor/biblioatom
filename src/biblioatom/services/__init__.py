@@ -44,8 +44,37 @@ class FetcherProtocol(Protocol):
 
 
 @runtime_checkable
+class RawFetcherProtocol(Protocol):
+    """Источник сырых (неразобранных) ответов сервера — для кэша на диске."""
+
+    def fetch_book_meta_raw(self, book_id: str) -> str:
+        """Вернуть сырой HTML страницы книги."""
+        ...
+
+    def fetch_toc_raw(self, book_id: str) -> str:
+        """Вернуть сырой HTML страницы p0 (оглавление)."""
+        ...
+
+    def fetch_page_raw(self, book_id: str, page: int) -> str:
+        """Вернуть сырой текст RPC-ответа страницы."""
+        ...
+
+    def fetch_image(self, book_id: str, page: int) -> bytes:
+        """Вернуть байты изображения страницы (скан)."""
+        ...
+
+
+@runtime_checkable
 class ParserProtocol(Protocol):
     """Разбор сырого HTML/JSON в доменные модели."""
+
+    def parse_book_meta(self, html: str, book_id: str) -> BookMeta:
+        """Извлечь метаданные книги из HTML."""
+        ...
+
+    def parse_toc(self, html: str) -> list[TocEntry]:
+        """Разобрать оглавление книги из HTML."""
+        ...
 
     def parse_embedded_content(self, raw: str | dict[str, object]) -> EmbeddedContent:
         """Разобрать поле ``content`` страницы.
@@ -120,6 +149,7 @@ __all__ = [
     "FetcherProtocol",
     "ImageProcessorProtocol",
     "ParserProtocol",
+    "RawFetcherProtocol",
     "ScanExtractorProtocol",
     "StructureAnalyzerProtocol",
 ]
